@@ -1,42 +1,72 @@
 // ============================================================
-// 裝備資料表 —— 之後有新品項/新重量，直接在這裡增修即可
+// 預設類別與範例裝備
+// 每個人的裝備清單存在自己的帳號裡（App 內新增/修改/刪除）
+// 這裡只放：①預設大類別 ②「載入範例清單」用的範例 ③舊版紀錄的轉換
 // weight 單位：公克 (g)
-// estimated: true 表示官網無精確數據，屬於估算值
-// defaultOn: true 表示預設勾選
-// owned: false 會顯示「未入手」標籤
+// ⚠ 範例裝備的 id 不可改名：v1.x 的舊紀錄靠這些 id 轉換
 // ============================================================
-export const LAYER_ITEMS = [
-  { id: "storm-cruiser", name: "Montbell Storm Cruiser 硬殼外套", color: "黃", weight: 269, estimated: false, defaultOn: true },
-  { id: "mt500", name: "迪卡農 MT500 美麗諾長袖", color: "橘", weight: 216, estimated: false, defaultOn: true },
-  { id: "wind-parka", name: "Montbell U.L. Stretch Wind Parka", color: "橘", weight: 117, estimated: false, defaultOn: true },
-  { id: "down-parka", name: "Montbell Superior Down Parka 800FP", color: "—", weight: 249, estimated: false, defaultOn: false, owned: false },
-  { id: "cove-beach-pant", name: "Columbia Cove Beach Pant 登山褲", color: "橘黑", weight: 305, estimated: false, defaultOn: true },
-  { id: "decathlon-shorts", name: "迪卡農登山短褲", color: "深灰", weight: 300, estimated: false, defaultOn: false },
+
+// icon 對應 app.jsx 裡的 ICONS
+export const PRESET_CATEGORIES = [
+  { key: "shoes", title: "鞋款", icon: "Footprints" },
+  { key: "clothing", title: "衣物", icon: "Shirt" },
+  { key: "pack", title: "背包", icon: "Backpack" },
+  { key: "sleep", title: "睡眠", icon: "Tent" },
+  { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
+  { key: "water", title: "水具", icon: "Droplet" },
+  { key: "electronics", title: "電子照明", icon: "Flashlight" },
+  { key: "accessory", title: "配件", icon: "Glasses" },
+  { key: "safety", title: "醫療安全", icon: "Cross" },
+  { key: "other", title: "其他", icon: "Package" },
 ];
 
-export const FOOTWEAR_ITEMS = [
-  { id: "speedgoat7", name: "Hoka Speedgoat 7", color: "黑白", weight: 548, estimated: false, note: "雙腳合計・輕量跑鞋" },
-  { id: "olympus6", name: "Altra Olympus 6 Hike Low GTX", color: "黑", weight: 816, estimated: false, note: "雙腳合計・防水登山鞋" },
+export const TEMP_CATEGORY_TITLE = "臨時品項";
+export const DEFAULT_TARGET_G = 7000; // 預設舒適重量目標，可在 App 內修改
+
+export const SAMPLE_GEAR = [
+  { id: "speedgoat7", category: "shoes", name: "Hoka Speedgoat 7", note: "黑白・雙腳合計・輕量跑鞋", weight: 548 },
+  { id: "olympus6", category: "shoes", name: "Altra Olympus 6 Hike Low GTX", note: "黑・雙腳合計・防水登山鞋", weight: 816 },
+  { id: "storm-cruiser", category: "clothing", name: "Montbell Storm Cruiser 硬殼外套", note: "黃", weight: 269 },
+  { id: "mt500", category: "clothing", name: "迪卡農 MT500 美麗諾長袖", note: "橘", weight: 216 },
+  { id: "wind-parka", category: "clothing", name: "Montbell U.L. Stretch Wind Parka", note: "橘", weight: 117 },
+  { id: "down-parka", category: "clothing", name: "Montbell Superior Down Parka 800FP", note: "未入手", weight: 249 },
+  { id: "cove-beach-pant", category: "clothing", name: "Columbia Cove Beach Pant 登山褲", note: "橘黑", weight: 305 },
+  { id: "decathlon-shorts", category: "clothing", name: "迪卡農登山短褲", note: "深灰", weight: 300 },
+  { id: "smartwool-socks", category: "clothing", name: "Smartwool羊毛襪", note: "灰色 香菇/魚/斧頭", weight: 66.5 },
+  { id: "darn-tough-socks", category: "clothing", name: "Darn Tough 羊毛襪", note: "外星人", weight: 77 },
+  { id: "hmg-southwest40", category: "pack", name: "Hyperlite Mountain Gear Southwest 40L 背包", note: "白・M 尺寸官方規格", weight: 841 },
+  { id: "adv-vest", category: "pack", name: "Salomon ADV Cross/Skin 15 攻頂包", note: "白・估算值", weight: 320 },
+  { id: "naturehike-mat", category: "sleep", name: "Naturehike 羽骨R3.6超輕自動充氣睡墊", note: "黃", weight: 610 },
+  { id: "naturehike-pillow", category: "sleep", name: "Naturehike 充氣枕頭", note: "", weight: 110 },
+  { id: "sts-aeros-pillow", category: "sleep", name: "Sea to Summit Aeros Pillow Premium", note: "深藍・L 尺寸・包裝標示", weight: 150 },
+  { id: "hydrapak", category: "water", name: "Hydrapak Contour 2L 水袋", note: "空重", weight: 142 },
+  { id: "headlamp", category: "electronics", name: "Nitecore NU25 MCT UL 頭燈", note: "", weight: 47 },
+  { id: "mt900-poles", category: "accessory", name: "迪卡農 MT900 摺疊登山杖", note: "單支 275g × 2", weight: 550 },
+  { id: "trail-hat", category: "accessory", name: "Hoka Trail Run Hat", note: "黑・估算值", weight: 42 },
+  { id: "urban3", category: "accessory", name: "VIGHT Urban 3 太陽眼鏡", note: "冰石藍", weight: 32 },
+  { id: "beams-neckwarmer", category: "accessory", name: "Beams 圍脖", note: "", weight: 47 },
 ];
 
-export const PACK_ITEMS = [
-  { id: "hmg-southwest40", name: "Hyperlite Mountain Gear Southwest 40L 背包", color: "白", weight: 841, estimated: false, defaultOn: true, note: "M 尺寸官方規格" },
-  { id: "adv-vest", name: "Salomon ADV Cross/Skin 15 攻頂包", color: "白", weight: 320, estimated: true, defaultOn: false },
-  { id: "mt900-poles", name: "迪卡農 MT900 摺疊登山杖", color: "—", weight: 550, estimated: false, defaultOn: true, note: "單支 275g × 2" },
-  { id: "hydrapak", name: "Hydrapak Contour 2L 水袋", color: "—", weight: 142, estimated: false, defaultOn: true, note: "空重" },
-  { id: "naturehike-mat", name: "Naturehike 羽骨R3.6超輕自動充氣睡墊", color: "黃", weight: 610, estimated: false, defaultOn: true },
+// 範例清單載入後預設勾選的品項（沿用 v1.x 的 defaultOn）
+export const SAMPLE_DEFAULT_ON = [
+  "storm-cruiser", "mt500", "wind-parka", "cove-beach-pant", "hmg-southwest40", "mt900-poles",
+  "hydrapak", "naturehike-mat", "trail-hat", "urban3", "headlamp", "smartwool-socks",
+  "darn-tough-socks", "naturehike-pillow", "beams-neckwarmer",
 ];
 
-export const ACCESSORY_ITEMS = [
-  { id: "trail-hat", name: "Hoka Trail Run Hat", color: "黑", weight: 42, estimated: true, defaultOn: true },
-  { id: "urban3", name: "VIGHT Urban 3 太陽眼鏡", color: "冰石藍", weight: 32, estimated: false, defaultOn: true },
-  { id: "headlamp", name: "Nitecore NU25 MCT UL 頭燈", color: "—", weight: 47, estimated: false, defaultOn: true, owned: true },
-  { id: "smartwool-socks", name: "Smartwool羊毛襪", color: "灰色 香菇/魚/斧頭", weight: 66.5, estimated: false, defaultOn: true },
-  { id: "darn-tough-socks", name: "Darn Tough 羊毛襪", color: "外星人", weight: 77, estimated: false, defaultOn: true, owned: true },
-  { id: "naturehike-pillow", name: "Naturehike 充氣枕頭", color: "—", weight: 110, estimated: false, defaultOn: true },
-  { id: "sts-aeros-pillow", name: "Sea to Summit Aeros Pillow Premium", color: "深藍", weight: 150, estimated: false, defaultOn: false, note: "L 尺寸・包裝標示" },
-  { id: "beams-neckwarmer", name: "Beams 圍脖", color: "—", weight: 47, estimated: false, defaultOn: true },
-];
-
-export const MAX_SCALE_G = 9000; // 山岳量規的滿刻度（供視覺化用）
-export const COMFORT_TARGET_G = 7000; // 葉董設定的舒適重量目標
+/**
+ * v1.x 的紀錄格式 { checked, footwear, customItems } → v2 格式 { items: [...] }
+ * v2 紀錄把每件裝備的名稱/重量完整存下來，之後改裝備清單也不影響舊紀錄
+ */
+export function upgradeLegacyRecord(r) {
+  if (Array.isArray(r.items)) return r;
+  const catTitle = (key) => PRESET_CATEGORIES.find((c) => c.key === key)?.title || "其他";
+  const snap = (g) => ({ id: g.id, cat: catTitle(g.category), name: g.name, note: g.note || "", weight: g.weight });
+  const items = SAMPLE_GEAR.filter(
+    (g) => (g.category === "shoes" ? g.id === r.footwear : r.checked && r.checked[g.id])
+  ).map(snap);
+  (r.customItems || [])
+    .filter((c) => c.checked)
+    .forEach((c) => items.push({ id: c.id, cat: TEMP_CATEGORY_TITLE, name: c.name, note: "", weight: c.weight }));
+  return { id: r.id, title: r.title, date: r.date, total: r.total, items };
+}
