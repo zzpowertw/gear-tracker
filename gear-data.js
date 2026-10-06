@@ -14,12 +14,14 @@ export const PRESET_CATEGORIES = [
   { key: "sleep", title: "睡眠", icon: "Tent" },
   { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
   { key: "water", title: "水具", icon: "Droplet" },
-  { key: "electronics", title: "電子照明", icon: "Flashlight" },
-  { key: "devices", title: "電子設備", icon: "Smartphone" },
+  { key: "electronics", title: "電子設備", icon: "Smartphone" }, // v2.3 起合併原「電子照明」與「電子設備」
   { key: "accessory", title: "配件", icon: "Glasses" },
   { key: "safety", title: "醫療安全", icon: "Cross" },
   { key: "other", title: "其他", icon: "Package" },
 ];
+
+// 已合併/停用的類別 key → 新的 key；App 打開時會自動把裝備搬過去
+export const CATEGORY_ALIASES = { devices: "electronics" };
 
 export const TEMP_CATEGORY_TITLE = "臨時品項";
 export const DEFAULT_TARGET_G = 7000; // 預設舒適重量目標，可在 App 內修改

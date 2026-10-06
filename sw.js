@@ -4,7 +4,7 @@
 // - 外部程式庫（固定版本號，不會變）：先用快取，加快開啟速度
 // 每次發佈新版請把 CACHE_VERSION 改成跟 app.jsx 的 APP_VERSION 一樣
 // ============================================================
-const CACHE_VERSION = "2.2.0";
+const CACHE_VERSION = "2.3.0";
 const CACHE = `gear-reckoner-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -55,7 +55,9 @@ async function networkFirst(req) {
   const cache = await caches.open(CACHE);
   try {
     // no-cache：每次都向伺服器確認有沒有新版，避免拿到瀏覽器暫存的舊檔
-    const res = await fetch(req, { cache: "no-cache" });
+    // 打開頁面（navigate）的請求不能直接加選項，改用網址重新發一個請求
+    const fresh = req.mode === "navigate" ? new Request(req.url, { cache: "no-cache" }) : new Request(req, { cache: "no-cache" });
+    const res = await fetch(fresh);
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch (e) {

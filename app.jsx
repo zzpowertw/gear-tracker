@@ -32,13 +32,13 @@ import {
   Target,
   RefreshCw,
   Smartphone,
-  ChevronUp,
-  ChevronDown,
   ArrowUpDown,
   Check,
+  GripVertical,
 } from "lucide-react";
 import {
   PRESET_CATEGORIES,
+  CATEGORY_ALIASES,
   TEMP_CATEGORY_TITLE,
   DEFAULT_TARGET_G,
   SAMPLE_GEAR,
@@ -48,7 +48,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.3.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 const BACKUP_SCHEMA = 2;
 // 編輯中的內容（勾選、標題、臨時品項）：本機存一份；登入時也存到雲端 meta/draft，跨裝置同步
@@ -276,7 +276,7 @@ function GearReckoner() {
   const [newTempWeight, setNewTempWeight] = useState("");
 
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
-  const [reorderMode, setReorderMode] = useState(false); // 整理模式：用 ▲▼ 調整順序
+  const [reorderMode, setReorderMode] = useState(false); // 整理模式：拖曳調整順序
   const [saving, setSaving] = useState(false);
   const importInput = useRef(null);
   const upgradedIds = useRef(new Set());
@@ -310,6 +310,14 @@ function GearReckoner() {
     legacy.forEach((r) => upgradedIds.current.add(r.id));
     store.putMany(user, "records", legacy.map(upgradeLegacyRecord));
   }, [records, user]);
+
+  // 已合併的類別（例如舊的「電子設備」devices）→ 自動把裝備搬到新類別
+  useEffect(() => {
+    if (!loaded.gear) return;
+    const stale = gear.filter((g) => CATEGORY_ALIASES[g.category]);
+    if (stale.length === 0) return;
+    store.putMany(user, "gear", stale.map((g) => ({ ...g, category: CATEGORY_ALIASES[g.category] })));
+  }, [gear, loaded.gear, user]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -522,25 +530,21 @@ function GearReckoner() {
     return true;
   };
 
-  // 大類別上移/下移：跟畫面上相鄰的類別交換位置
-  const moveCategory = (key, dir) => {
+  // 拖曳大類別：畫面上第 from 個類別移到第 to 個位置（沒有裝備的類別維持原位）
+  const reorderCategories = (from, to) => {
     const visible = gearByCat.map((c) => c.key);
-    const neighbor = visible[visible.indexOf(key) + dir];
-    if (!neighbor) return;
-    const keys = categories.map((c) => c.key);
-    const a = keys.indexOf(key);
-    const b = keys.indexOf(neighbor);
-    [keys[a], keys[b]] = [keys[b], keys[a]];
-    saveMeta({ categoryOrder: keys });
+    const [moved] = visible.splice(from, 1);
+    visible.splice(to, 0, moved);
+    const visibleSet = new Set(visible);
+    let k = 0;
+    saveMeta({ categoryOrder: categories.map((c) => (visibleSet.has(c.key) ? visible[k++] : c.key)) });
   };
 
-  // 裝備上移/下移：在同一類別裡交換，並把整個類別重新編號
-  const moveGear = (cat, id, dir) => {
+  // 拖曳裝備：在同一類別裡移動，並把整個類別重新編號
+  const reorderGear = (cat, from, to) => {
     const items = [...cat.items];
-    const i = items.findIndex((g) => g.id === id);
-    const j = i + dir;
-    if (j < 0 || j >= items.length) return;
-    [items[i], items[j]] = [items[j], items[i]];
+    const [moved] = items.splice(from, 1);
+    items.splice(to, 0, moved);
     store.putMany(user, "gear", items.map((g, idx) => ({ ...g, order: idx })));
   };
 
@@ -832,6 +836,23 @@ function GearReckoner() {
         }
         .cat-chip.selected { border-color: ${palette.amber}; color: ${palette.amber}; }
         .cat-chip.add { border-style: dashed; }
+        .drag-row {
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px; border-radius: 8px;
+          border: 1px solid ${palette.line}; background: ${palette.panelAlt};
+        }
+        .drag-handle {
+          display: flex; padding: 4px; margin: -4px 0 -4px -4px;
+          color: ${palette.textMuted}; cursor: grab; touch-action: none;
+        }
+        .drag-ghost { opacity: 0.3; }
+        .drag-chosen { border-color: ${palette.amber}; }
+        .sortable-fallback { opacity: 0.95 !important; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .tab-btn {
+          background: none; border: none; cursor: pointer; padding: 6px 10px;
+          border-radius: 6px; font-size: 13px; font-weight: 600; color: ${palette.textMuted};
+        }
+        .tab-btn.active { background: ${palette.panelAlt}; color: ${palette.amber}; }
         .field-label { font-size: 12px; color: ${palette.textMuted}; margin: 14px 0 6px; display: block; }
       `}</style>
 
@@ -922,123 +943,93 @@ function GearReckoner() {
             ) : (
               <>
                 {reorderMode ? (
-                  <div
-                    style={{
-                      ...panelStyle,
-                      padding: "10px 12px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      borderColor: palette.amber,
-                      position: "sticky",
-                      top: 8,
-                      zIndex: 5,
-                    }}
-                  >
-                    <ArrowUpDown size={16} color={palette.amber} />
-                    <span style={{ fontSize: 13, color: palette.textMuted, flex: 1 }}>
-                      整理模式：用 ▲▼ 調整大類別和裝備的順序
-                    </span>
-                    <button className="action-btn primary" onClick={() => setReorderMode(false)}>
-                      <Check size={14} /> 完成
-                    </button>
-                  </div>
+                  <ReorderView
+                    gearByCat={gearByCat}
+                    onCategoryReorder={reorderCategories}
+                    onGearReorder={reorderGear}
+                    onDone={() => setReorderMode(false)}
+                  />
                 ) : (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      className="action-btn"
-                      style={{ borderStyle: "dashed", padding: 12, flex: 1 }}
-                      onClick={() => setEditor({ item: {} })}
-                    >
-                      <Plus size={15} /> 新增裝備
-                    </button>
-                    <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
-                      <ArrowUpDown size={15} /> 排序
-                    </button>
-                  </div>
-                )}
+                  <>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        className="action-btn"
+                        style={{ borderStyle: "dashed", padding: 12, flex: 1 }}
+                        onClick={() => setEditor({ item: {} })}
+                      >
+                        <Plus size={15} /> 新增裝備
+                      </button>
+                      <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
+                        <ArrowUpDown size={15} /> 排序
+                      </button>
+                    </div>
 
-                {gearByCat.map((cat, catIndex) => {
-                  const Icon = ICONS[cat.icon] || Tag;
-                  const subtotal = catTotals.find((c) => c.key === cat.key)?.value || 0;
-                  return (
-                    <section key={cat.key} style={panelStyle}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Icon size={16} color={palette.moss} />
-                          <span style={headingStyle}>{cat.title}</span>
-                        </div>
-                        {reorderMode ? (
-                          <MoveButtons
-                            label="類別"
-                            onUp={catIndex > 0 && (() => moveCategory(cat.key, -1))}
-                            onDown={catIndex < gearByCat.length - 1 && (() => moveCategory(cat.key, 1))}
-                          />
-                        ) : (
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
-                              {formatWeight(subtotal)}
-                            </span>
-                            <button
-                              className="icon-btn"
-                              title={`在「${cat.title}」新增裝備`}
-                              onClick={() => setEditor({ item: { category: cat.key } })}
-                            >
-                              <Plus size={15} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        {cat.items.map((it, itemIndex) => (
-                          <div
-                            key={it.id}
-                            className={`item-row ${checked[it.id] ? "on" : ""}`}
-                            style={reorderMode ? { cursor: "default" } : undefined}
-                            onClick={() => !reorderMode && toggle(it.id)}
-                          >
-                            <CheckBox on={checked[it.id]} />
-                            <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
-                              {it.name}
-                              {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
+                    {gearByCat.map((cat) => {
+                      const Icon = ICONS[cat.icon] || Tag;
+                      const subtotal = catTotals.find((c) => c.key === cat.key)?.value || 0;
+                      return (
+                        <section key={cat.key} style={panelStyle}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <Icon size={16} color={palette.moss} />
+                              <span style={headingStyle}>{cat.title}</span>
                             </div>
-                            <div
-                              style={{
-                                ...monoStyle,
-                                fontSize: 13.5,
-                                fontWeight: 600,
-                                minWidth: 56,
-                                textAlign: "right",
-                                color: checked[it.id] ? palette.text : palette.textFaint,
-                              }}
-                            >
-                              {formatWeight(it.weight)}
-                            </div>
-                            {reorderMode ? (
-                              <MoveButtons
-                                label="裝備"
-                                onUp={itemIndex > 0 && (() => moveGear(cat, it.id, -1))}
-                                onDown={itemIndex < cat.items.length - 1 && (() => moveGear(cat, it.id, 1))}
-                              />
-                            ) : (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
+                                {formatWeight(subtotal)}
+                              </span>
                               <button
                                 className="icon-btn"
-                                title="修改或刪除"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditor({ item: it });
-                                }}
+                                title={`在「${cat.title}」新增裝備`}
+                                onClick={() => setEditor({ item: { category: cat.key } })}
                               >
-                                <Pencil size={13} />
+                                <Plus size={15} />
                               </button>
-                            )}
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
+  
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            {cat.items.map((it) => (
+                              <div
+                                key={it.id}
+                                className={`item-row ${checked[it.id] ? "on" : ""}`}
+                                onClick={() => toggle(it.id)}
+                              >
+                                <CheckBox on={checked[it.id]} />
+                                <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
+                                  {it.name}
+                                  {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
+                                </div>
+                                <div
+                                  style={{
+                                    ...monoStyle,
+                                    fontSize: 13.5,
+                                    fontWeight: 600,
+                                    minWidth: 56,
+                                    textAlign: "right",
+                                    color: checked[it.id] ? palette.text : palette.textFaint,
+                                  }}
+                                >
+                                  {formatWeight(it.weight)}
+                                </div>
+                                <button
+                                  className="icon-btn"
+                                  title="修改或刪除"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditor({ item: it });
+                                  }}
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </>
+                )}
               </>
             )}
 
@@ -1423,24 +1414,141 @@ function GearReckoner() {
   );
 }
 
-// 整理模式的 ▲▼ 按鈕；onUp/onDown 傳 false 代表已經在最上/最下
-function MoveButtons({ label, onUp, onDown }) {
-  const style = (enabled) => ({
-    padding: 6,
-    opacity: enabled ? 1 : 0.25,
-    cursor: enabled ? "pointer" : "default",
-    border: `1px solid ${palette.line}`,
-    color: enabled ? palette.amber : palette.textFaint,
-  });
+// ------------------------------------------------------------
+// 拖曳排序（SortableJS）：按住 ⠿ 把手拖曳
+// 拖完先把畫面還原，再由資料更新後重新排列，避免跟 React 打架
+// 用完整網址動態載入（不放 index.html 的 import map）：更新後第一次打開時
+// 瀏覽器可能還拿著舊的 index.html，這樣才不會因此載入失敗
+// ------------------------------------------------------------
+const SORTABLE_URL = "https://esm.sh/sortablejs@1.15.6";
+
+function SortableList({ onMove, style, children }) {
+  const ref = useRef(null);
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
+  useEffect(() => {
+    let sortable = null;
+    let cancelled = false;
+    import(SORTABLE_URL).then(({ default: Sortable }) => {
+      if (cancelled) return;
+      sortable = Sortable.create(ref.current, {
+        handle: ".drag-handle",
+        animation: 150,
+        forceFallback: true, // 電腦和手機用同一套拖曳方式
+        ghostClass: "drag-ghost",
+        chosenClass: "drag-chosen",
+        onEnd: ({ item, from, oldIndex, newIndex }) => {
+          if (oldIndex === newIndex) return;
+          from.removeChild(item);
+          from.insertBefore(item, from.children[oldIndex] || null);
+          onMoveRef.current(oldIndex, newIndex);
+        },
+      });
+    });
+    return () => {
+      cancelled = true;
+      if (sortable) sortable.destroy();
+    };
+  }, []);
   return (
-    <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-      <button className="icon-btn" style={style(onUp)} disabled={!onUp} onClick={onUp || undefined} title={`${label}上移`}>
-        <ChevronUp size={15} />
-      </button>
-      <button className="icon-btn" style={style(onDown)} disabled={!onDown} onClick={onDown || undefined} title={`${label}下移`}>
-        <ChevronDown size={15} />
-      </button>
+    <div ref={ref} style={style}>
+      {children}
     </div>
+  );
+}
+
+function DragHandle() {
+  return (
+    <span className="drag-handle" title="按住拖曳">
+      <GripVertical size={16} />
+    </span>
+  );
+}
+
+function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
+  const [tab, setTab] = useState("gear");
+  const panel = {
+    background: palette.panel,
+    borderRadius: 14,
+    padding: 16,
+    border: `1px solid ${palette.line}`,
+  };
+  const listStyle = { display: "flex", flexDirection: "column", gap: 6 };
+  const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: palette.textMuted };
+
+  return (
+    <>
+      <div
+        style={{
+          ...panel,
+          padding: "10px 12px",
+          borderColor: palette.amber,
+          position: "sticky",
+          top: 8,
+          zIndex: 5,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ArrowUpDown size={16} color={palette.amber} />
+          <button className={`tab-btn ${tab === "gear" ? "active" : ""}`} onClick={() => setTab("gear")}>
+            排裝備
+          </button>
+          <button className={`tab-btn ${tab === "categories" ? "active" : ""}`} onClick={() => setTab("categories")}>
+            排大類別
+          </button>
+          <button className="action-btn primary" style={{ marginLeft: "auto" }} onClick={onDone}>
+            <Check size={14} /> 完成
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: palette.textMuted, marginTop: 6 }}>
+          按住左邊的 <GripVertical size={12} style={{ verticalAlign: -2 }} /> 拖到想要的位置
+        </div>
+      </div>
+
+      {tab === "categories" ? (
+        <section style={panel}>
+          <SortableList onMove={onCategoryReorder} style={listStyle}>
+            {gearByCat.map((cat) => {
+              const Icon = ICONS[cat.icon] || Tag;
+              return (
+                <div key={cat.key} className="drag-row">
+                  <DragHandle />
+                  <Icon size={16} color={palette.moss} />
+                  <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.title}</span>
+                  <span style={mono}>{cat.items.length} 件</span>
+                </div>
+              );
+            })}
+          </SortableList>
+        </section>
+      ) : (
+        gearByCat.map((cat) => {
+          const Icon = ICONS[cat.icon] || Tag;
+          return (
+            <section key={cat.key} style={panel}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <Icon size={16} color={palette.moss} />
+                <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15 }}>
+                  {cat.title}
+                </span>
+              </div>
+              <SortableList onMove={(from, to) => onGearReorder(cat, from, to)} style={listStyle}>
+                {cat.items.map((it) => (
+                  <div key={it.id} className="drag-row">
+                    <DragHandle />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
+                      {it.name}
+                      {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
+                    </div>
+                    <span style={mono}>{formatWeight(it.weight)}</span>
+                  </div>
+                ))}
+              </SortableList>
+            </section>
+          );
+        })
+      )}
+    </>
   );
 }
 
