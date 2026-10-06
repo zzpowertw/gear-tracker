@@ -20,6 +20,7 @@ Personal hiking-gear weight calculator PWA. Single user, not published to any st
 1. Bump `APP_VERSION` in `app.jsx` **and** `CACHE_VERSION` in `sw.js` (same value, semver).
 2. Add entry to `CHANGELOG.md` (Traditional Chinese).
 3. Commit with clear message, tag `vX.Y.Z`, push `main` + tags. Owner wants every change auto-pushed.
+4. Verify deploy: `gh api repos/zzpowertw/gear-tracker/pages/builds/latest --jq .commit` must equal HEAD. GitHub sometimes skips the Pages build on push — if so, `gh api -X POST repos/zzpowertw/gear-tracker/pages/builds` and check again. Confirm with `curl "https://zzpowertw.github.io/gear-tracker/app.jsx?n=$RANDOM" | grep APP_VERSION`.
 
 ## Local preview
 `python -m http.server 8765` (also in `.claude/launch.json` as `gear-app`).
