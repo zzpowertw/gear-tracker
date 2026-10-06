@@ -115,10 +115,14 @@ export async function signOut() {
 
 // ---------- 資料 ----------
 
-/** 監聽一種資料的全部文件。cb(docs)。回傳取消監聽的函式。 */
+/**
+ * 監聽一種資料的全部文件。cb(docs, info)，回傳取消監聽的函式。
+ * info.pending：這台裝置還有資料沒傳上雲端
+ * info.fromCache：目前顯示的是本機快取，還沒跟雲端確認過
+ */
 export function watch(user, name, cb) {
   if (!user) {
-    const emit = () => cb(readLocal(name));
+    const emit = () => cb(readLocal(name), { pending: false, fromCache: false });
     emit();
     window.addEventListener("local-data-changed", emit);
     window.addEventListener("storage", emit); // 同一台電腦其他分頁的變動
@@ -135,7 +139,12 @@ export function watch(user, name, cb) {
     migrateLocalToCloud(fb, user, name);
     unsub = fb.fsMod.onSnapshot(
       col(fb, user, name),
-      (snap) => cb(snap.docs.map((d) => d.data())),
+      { includeMetadataChanges: true },
+      (snap) =>
+        cb(
+          snap.docs.map((d) => d.data()),
+          { pending: snap.metadata.hasPendingWrites, fromCache: snap.metadata.fromCache }
+        ),
       (e) => console.error(`讀取雲端 ${name} 失敗`, e)
     );
   });
@@ -174,6 +183,21 @@ export async function remove(user, name, id) {
   fb.fsMod
     .deleteDoc(fb.fsMod.doc(col(fb, user, name), id))
     .catch((e) => console.error(`雲端刪除 ${name} 失敗`, e));
+}
+
+/**
+ * 立即同步：跟雲端斷線再重連（強制重新抓最新資料），並等待本機未上傳的資料送出
+ * 離線時會在 timeoutMs 後丟出錯誤
+ */
+export async function syncNow(timeoutMs = 15000) {
+  if (!cloudEnabled) return;
+  const fb = await loadFirebase();
+  await fb.fsMod.disableNetwork(fb.db);
+  await fb.fsMod.enableNetwork(fb.db);
+  await Promise.race([
+    fb.fsMod.waitForPendingWrites(fb.db),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+  ]);
 }
 
 // 第一次登入時，把這台裝置在本機模式存的資料搬上雲端

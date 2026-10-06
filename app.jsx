@@ -30,6 +30,7 @@ import {
   X,
   ShieldCheck,
   Target,
+  RefreshCw,
 } from "lucide-react";
 import {
   PRESET_CATEGORIES,
@@ -42,10 +43,12 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 const BACKUP_SCHEMA = 2;
-const DRAFT_KEY = "gear-draft"; // 目前畫面上的勾選狀態（只存本機，下次打開還在）
+// 編輯中的內容（勾選、標題、臨時品項）：本機存一份；登入時也存到雲端 meta/draft，跨裝置同步
+const DRAFT_KEY = "gear-draft";
+const DRAFT_PUSH_DELAY_MS = 600; // 停手多久後才上傳，避免打字時每個字都上傳
 const BACKUP_REMIND_DAYS = 30;
 
 const ICONS = { Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Glasses, Cross, Package, Tag };
@@ -217,6 +220,20 @@ function loadDraft() {
   }
 }
 
+// 這台裝置的代號：用來分辨雲端的編輯內容是不是自己剛傳的
+const DEVICE_ID = (() => {
+  try {
+    let id = localStorage.getItem("gear-device-id");
+    if (!id) localStorage.setItem("gear-device-id", (id = Math.random().toString(36).slice(2, 10)));
+    return id;
+  } catch (e) {
+    return Math.random().toString(36).slice(2, 10);
+  }
+})();
+
+const formatClock = (ts) =>
+  `${String(new Date(ts).getHours()).padStart(2, "0")}:${String(new Date(ts).getMinutes()).padStart(2, "0")}`;
+
 const newId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 /** 讀進來的備份檔 → 統一成目前格式。未來備份格式改版時在這裡加轉換 */
@@ -236,6 +253,9 @@ function GearReckoner() {
   // 登入狀態：undefined = 確認中、null = 未登入/本機模式、物件 = 已登入
   const [user, setUser] = useState(undefined);
   const [online, setOnline] = useState(navigator.onLine);
+  const [syncInfo, setSyncInfo] = useState({}); // 每種資料的 { pending, fromCache }
+  const [lastConfirmed, setLastConfirmed] = useState(null); // 最後一次跟雲端確認的時間
+  const [syncing, setSyncing] = useState(false);
 
   // 雲端（或本機）資料
   const [gear, setGear] = useState([]);
@@ -254,17 +274,24 @@ function GearReckoner() {
   const [saving, setSaving] = useState(false);
   const importInput = useRef(null);
   const upgradedIds = useRef(new Set());
+  const draftStamp = useRef(draft.updatedAt || 0); // 目前畫面上編輯內容的時間戳記
+  const skipDraftPush = useRef(true); // 第一次顯示、或剛套用其他裝置的內容時，不要再傳回去
+  const draftTimer = useRef(null);
+  const pushDraftRef = useRef(() => {});
 
   useEffect(() => store.watchAuth(setUser), []);
 
   useEffect(() => {
     if (user === undefined) return;
     setLoaded({});
+    setSyncInfo({});
     const setters = { gear: setGear, records: setRecords, meta: setMetaDocs };
     const unsubs = store.COLLECTIONS.map((name) =>
-      store.watch(user, name, (docs) => {
+      store.watch(user, name, (docs, info) => {
         setters[name](docs);
         setLoaded((prev) => ({ ...prev, [name]: true }));
+        setSyncInfo((prev) => ({ ...prev, [name]: info }));
+        if (user && !info.fromCache && !info.pending) setLastConfirmed(Date.now());
       })
     );
     return () => unsubs.forEach((u) => u());
@@ -288,16 +315,89 @@ function GearReckoner() {
     };
   }, []);
 
+  // 其他裝置更新了編輯內容 → 套用到這台（比較新的才套用）
   useEffect(() => {
+    const remote = metaDocs.find((d) => d.id === "draft");
+    if (!remote || remote.deviceId === DEVICE_ID) return;
+    if ((remote.updatedAt || 0) <= draftStamp.current) return;
+    draftStamp.current = remote.updatedAt;
+    skipDraftPush.current = true;
+    setChecked(remote.checked || {});
+    setTitle(remote.title || "");
+    setTempItems(remote.tempItems || []);
+  }, [metaDocs]);
+
+  // 編輯內容有變 → 存本機，登入時稍等一下再上傳雲端
+  useEffect(() => {
+    const isRemoteOrInitial = skipDraftPush.current;
+    skipDraftPush.current = false;
+    if (!isRemoteOrInitial) draftStamp.current = Date.now();
+    const snapshot = { checked, title, tempItems, updatedAt: draftStamp.current };
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ checked, title, tempItems }));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot));
     } catch (e) {
       // 本機儲存空間不可用（例如無痕模式），不影響使用
     }
+    if (isRemoteOrInitial || !user) return;
+    const push = () => {
+      clearTimeout(draftTimer.current);
+      pushDraftRef.current = () => {};
+      store.put(user, "meta", { ...snapshot, id: "draft", deviceId: DEVICE_ID });
+    };
+    clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(push, DRAFT_PUSH_DELAY_MS);
+    pushDraftRef.current = push;
   }, [checked, title, tempItems]);
+
+  // 立即同步：先把還沒上傳的編輯內容送出，再跟雲端重新連線
+  const syncNow = async ({ quiet = false } = {}) => {
+    if (!user || syncing) return;
+    pushDraftRef.current();
+    setSyncing(true);
+    try {
+      await store.syncNow();
+      setLastConfirmed(Date.now());
+    } catch (e) {
+      if (!quiet) alert(navigator.onLine ? "同步逾時，請確認網路後再試一次。" : "目前沒有網路，連線後會自動同步。");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // 切到別的 App 前先上傳；切回來時自動同步一次
+  useEffect(() => {
+    const onHide = () => pushDraftRef.current();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") onHide();
+      else syncNow({ quiet: true });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onHide);
+    };
+  });
+
+  // 讓同步時間之類的顯示會自己更新
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   // ---------- 衍生資料 ----------
   const meta = metaDocs.find((d) => d.id === "settings") || {};
+  const syncValues = Object.values(syncInfo);
+  const syncState = !online
+    ? "offline"
+    : syncing
+    ? "syncing"
+    : syncValues.some((i) => i.pending)
+    ? "uploading"
+    : syncValues.length < store.COLLECTIONS.length || syncValues.some((i) => i.fromCache)
+    ? "connecting"
+    : "synced";
   const saveMeta = (changes) => store.put(user, "meta", { ...meta, ...changes, id: "settings" });
 
   const categories = useMemo(
@@ -707,7 +807,14 @@ function GearReckoner() {
             <div style={{ ...monoStyle, fontSize: 12, letterSpacing: "0.12em", color: palette.moss }}>
               {owner} · GEAR RECKONER
             </div>
-            <SyncStatus user={user} online={online} onSignIn={handleSignIn} onSignOut={handleSignOut} />
+            <SyncStatus
+              user={user}
+              syncState={syncState}
+              lastConfirmed={lastConfirmed}
+              onSync={() => syncNow()}
+              onSignIn={handleSignIn}
+              onSignOut={handleSignOut}
+            />
           </div>
           <h1
             style={{
@@ -1171,7 +1278,7 @@ function GearReckoner() {
               <span>
                 儲存的紀錄會保留當下完整的品名與重量，之後修改或刪除清單裡的裝備，不會影響舊紀錄。
                 {user
-                  ? "裝備清單和紀錄存在你的 Google 帳號雲端空間，手機和電腦登入同一帳號即自動同步，僅你可見。"
+                  ? "裝備清單、紀錄和目前勾選的內容都存在你的 Google 帳號雲端空間，手機和電腦登入同一帳號即自動同步，僅你可見。"
                   : "目前資料只存在這台裝置，登入後會自動搬上雲端。"}
               </span>
             </div>
@@ -1365,7 +1472,7 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
 // ------------------------------------------------------------
 // 右上角的同步狀態：本機模式 / 登入按鈕 / 已同步
 // ------------------------------------------------------------
-function SyncStatus({ user, online, onSignIn, onSignOut }) {
+function SyncStatus({ user, syncState, lastConfirmed, onSync, onSignIn, onSignOut }) {
   const chip = {
     display: "flex",
     alignItems: "center",
@@ -1376,6 +1483,7 @@ function SyncStatus({ user, online, onSignIn, onSignOut }) {
     border: `1px solid ${palette.line}`,
     background: palette.panel,
     color: palette.textMuted,
+    whiteSpace: "nowrap",
   };
 
   if (!store.cloudEnabled) {
@@ -1399,12 +1507,34 @@ function SyncStatus({ user, online, onSignIn, onSignOut }) {
       </button>
     );
   }
+
+  const status = {
+    offline: { color: palette.amber, icon: <CloudOff size={13} />, text: "離線中・連線後自動同步" },
+    syncing: { color: palette.textMuted, icon: <Loader2 size={13} className="spin" />, text: "同步中…" },
+    uploading: { color: palette.amber, icon: <Loader2 size={13} className="spin" />, text: "上傳中…" },
+    connecting: { color: palette.textMuted, icon: <Loader2 size={13} className="spin" />, text: "連線中…" },
+    synced: {
+      color: palette.moss,
+      icon: <Cloud size={13} />,
+      text: lastConfirmed ? `已同步 · ${formatClock(lastConfirmed)} 確認` : "已同步",
+    },
+  }[syncState];
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ ...chip, color: online ? palette.moss : palette.amber }} title={user.email}>
-        {online ? <Cloud size={13} /> : <CloudOff size={13} />}
-        {online ? "已同步" : "離線中・連線後自動同步"}
+      <div style={{ ...chip, color: status.color }} title={user.email}>
+        {status.icon}
+        {status.text}
       </div>
+      <button
+        className="action-btn"
+        style={{ padding: "5px 10px", fontSize: 12 }}
+        onClick={onSync}
+        disabled={syncState === "syncing"}
+        title="立即同步"
+      >
+        <RefreshCw size={13} className={syncState === "syncing" ? "spin" : ""} /> 同步
+      </button>
       <button className="action-btn" style={{ padding: "5px 8px", fontSize: 12 }} onClick={onSignOut} title={`登出 ${user.email}`}>
         <LogOut size={13} />
       </button>
