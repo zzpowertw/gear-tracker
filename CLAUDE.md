@@ -5,7 +5,7 @@ Personal hiking-gear weight calculator PWA. Single user, not published to any st
 ## Architecture (no build step)
 - `index.html` loads React / lucide-react from esm.sh via import map, and Babel standalone transpiles `app.jsx` in the browser. No Node/npm needed; don't introduce a bundler without asking.
 - `gear-data.js` — preset categories, sample gear (for "載入範例清單"), and `upgradeLegacyRecord` (v1 → v2 record format). Sample ids must never be renamed: v1 records are converted through them.
-- `storage.js` — per-user collections `gear`, `records`, `meta` (doc `settings`: customCategories, targetG, lastBackupAt). Not signed in → localStorage; signed in → Firestore `users/{uid}/<collection>` with persistent offline cache. Cloud writes are fire-and-forget (don't await server ack — hangs offline).
+- `storage.js` — per-user collections `gear` (optional `order` for manual sort), `records`, `meta` (doc `settings`: customCategories, categoryOrder, targetG, lastBackupAt; doc `draft`: in-progress checks/title/temp items synced across devices). Not signed in → localStorage; signed in → Firestore `users/{uid}/<collection>` with persistent offline cache. Cloud writes are fire-and-forget (don't await server ack — hangs offline).
 - `firestore.rules` — reference copy; must be pasted into Firebase console manually.
 - `sw.js` — network-first for own files, cache-first for pinned CDN URLs.
 - Hosting: GitHub Pages from `main` branch root → https://zzpowertw.github.io/gear-tracker/

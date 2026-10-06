@@ -31,6 +31,11 @@ import {
   ShieldCheck,
   Target,
   RefreshCw,
+  Smartphone,
+  ChevronUp,
+  ChevronDown,
+  ArrowUpDown,
+  Check,
 } from "lucide-react";
 import {
   PRESET_CATEGORIES,
@@ -43,7 +48,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 const BACKUP_SCHEMA = 2;
 // 編輯中的內容（勾選、標題、臨時品項）：本機存一份；登入時也存到雲端 meta/draft，跨裝置同步
@@ -51,7 +56,7 @@ const DRAFT_KEY = "gear-draft";
 const DRAFT_PUSH_DELAY_MS = 600; // 停手多久後才上傳，避免打字時每個字都上傳
 const BACKUP_REMIND_DAYS = 30;
 
-const ICONS = { Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Glasses, Cross, Package, Tag };
+const ICONS = { Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Smartphone, Glasses, Cross, Package, Tag };
 
 function formatWeight(g) {
   return g >= 1000 ? `${(g / 1000).toFixed(2)} kg` : `${Math.round(g * 10) / 10} g`;
@@ -271,6 +276,7 @@ function GearReckoner() {
   const [newTempWeight, setNewTempWeight] = useState("");
 
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
+  const [reorderMode, setReorderMode] = useState(false); // 整理模式：用 ▲▼ 調整順序
   const [saving, setSaving] = useState(false);
   const importInput = useRef(null);
   const upgradedIds = useRef(new Set());
@@ -400,16 +406,24 @@ function GearReckoner() {
     : "synced";
   const saveMeta = (changes) => store.put(user, "meta", { ...meta, ...changes, id: "settings" });
 
-  const categories = useMemo(
-    () => [
+  // 類別依使用者排好的順序（meta.categoryOrder）；沒排到的（例如新類別）接在後面
+  const categories = useMemo(() => {
+    const all = [
       ...PRESET_CATEGORIES,
       ...(meta.customCategories || []).map((c) => ({ ...c, icon: "Tag", custom: true })),
-    ],
-    [meta.customCategories]
-  );
+    ];
+    const order = meta.categoryOrder || [];
+    const rank = (c) => {
+      const i = order.indexOf(c.key);
+      return i === -1 ? order.length + all.indexOf(c) : i;
+    };
+    return [...all].sort((a, b) => rank(a) - rank(b));
+  }, [meta.customCategories, meta.categoryOrder]);
 
   const gearByCat = useMemo(() => {
-    const sorted = [...gear].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    // 手動排過的用 order，還沒排過的（例如新增的）依建立時間排在後面
+    const sortKey = (g) => (g.order != null ? g.order : g.createdAt || 0);
+    const sorted = [...gear].sort((a, b) => sortKey(a) - sortKey(b));
     const known = new Set(categories.map((c) => c.key));
     return categories
       .map((cat) => ({
@@ -506,6 +520,28 @@ function GearReckoner() {
     }
     saveMeta({ customCategories: (meta.customCategories || []).filter((c) => c.key !== key) });
     return true;
+  };
+
+  // 大類別上移/下移：跟畫面上相鄰的類別交換位置
+  const moveCategory = (key, dir) => {
+    const visible = gearByCat.map((c) => c.key);
+    const neighbor = visible[visible.indexOf(key) + dir];
+    if (!neighbor) return;
+    const keys = categories.map((c) => c.key);
+    const a = keys.indexOf(key);
+    const b = keys.indexOf(neighbor);
+    [keys[a], keys[b]] = [keys[b], keys[a]];
+    saveMeta({ categoryOrder: keys });
+  };
+
+  // 裝備上移/下移：在同一類別裡交換，並把整個類別重新編號
+  const moveGear = (cat, id, dir) => {
+    const items = [...cat.items];
+    const i = items.findIndex((g) => g.id === id);
+    const j = i + dir;
+    if (j < 0 || j >= items.length) return;
+    [items[i], items[j]] = [items[j], items[i]];
+    store.putMany(user, "gear", items.map((g, idx) => ({ ...g, order: idx })));
   };
 
   const handleLoadSample = () => {
@@ -618,7 +654,11 @@ function GearReckoner() {
       account: user?.email || "本機模式",
       gear,
       records,
-      settings: { customCategories: meta.customCategories || [], targetG: meta.targetG || null },
+      settings: {
+        customCategories: meta.customCategories || [],
+        categoryOrder: meta.categoryOrder || null,
+        targetG: meta.targetG || null,
+      },
     };
     const d = new Date();
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
@@ -643,7 +683,11 @@ function GearReckoner() {
       (data.settings.customCategories || []).forEach((c) => {
         if (!cats.some((x) => x.key === c.key)) cats.push(c);
       });
-      saveMeta({ customCategories: cats, targetG: data.settings.targetG || meta.targetG || null });
+      saveMeta({
+        customCategories: cats,
+        categoryOrder: data.settings.categoryOrder || meta.categoryOrder || null,
+        targetG: data.settings.targetG || meta.targetG || null,
+      });
       alert("匯入完成！");
     } catch (err) {
       alert(`匯入失敗：${err.message}`);
@@ -877,15 +921,44 @@ function GearReckoner() {
               </section>
             ) : (
               <>
-                <button
-                  className="action-btn"
-                  style={{ borderStyle: "dashed", padding: 12 }}
-                  onClick={() => setEditor({ item: {} })}
-                >
-                  <Plus size={15} /> 新增裝備
-                </button>
+                {reorderMode ? (
+                  <div
+                    style={{
+                      ...panelStyle,
+                      padding: "10px 12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      borderColor: palette.amber,
+                      position: "sticky",
+                      top: 8,
+                      zIndex: 5,
+                    }}
+                  >
+                    <ArrowUpDown size={16} color={palette.amber} />
+                    <span style={{ fontSize: 13, color: palette.textMuted, flex: 1 }}>
+                      整理模式：用 ▲▼ 調整大類別和裝備的順序
+                    </span>
+                    <button className="action-btn primary" onClick={() => setReorderMode(false)}>
+                      <Check size={14} /> 完成
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="action-btn"
+                      style={{ borderStyle: "dashed", padding: 12, flex: 1 }}
+                      onClick={() => setEditor({ item: {} })}
+                    >
+                      <Plus size={15} /> 新增裝備
+                    </button>
+                    <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
+                      <ArrowUpDown size={15} /> 排序
+                    </button>
+                  </div>
+                )}
 
-                {gearByCat.map((cat) => {
+                {gearByCat.map((cat, catIndex) => {
                   const Icon = ICONS[cat.icon] || Tag;
                   const subtotal = catTotals.find((c) => c.key === cat.key)?.value || 0;
                   return (
@@ -895,26 +968,35 @@ function GearReckoner() {
                           <Icon size={16} color={palette.moss} />
                           <span style={headingStyle}>{cat.title}</span>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
-                            {formatWeight(subtotal)}
-                          </span>
-                          <button
-                            className="icon-btn"
-                            title={`在「${cat.title}」新增裝備`}
-                            onClick={() => setEditor({ item: { category: cat.key } })}
-                          >
-                            <Plus size={15} />
-                          </button>
-                        </div>
+                        {reorderMode ? (
+                          <MoveButtons
+                            label="類別"
+                            onUp={catIndex > 0 && (() => moveCategory(cat.key, -1))}
+                            onDown={catIndex < gearByCat.length - 1 && (() => moveCategory(cat.key, 1))}
+                          />
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
+                              {formatWeight(subtotal)}
+                            </span>
+                            <button
+                              className="icon-btn"
+                              title={`在「${cat.title}」新增裝備`}
+                              onClick={() => setEditor({ item: { category: cat.key } })}
+                            >
+                              <Plus size={15} />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        {cat.items.map((it) => (
+                        {cat.items.map((it, itemIndex) => (
                           <div
                             key={it.id}
                             className={`item-row ${checked[it.id] ? "on" : ""}`}
-                            onClick={() => toggle(it.id)}
+                            style={reorderMode ? { cursor: "default" } : undefined}
+                            onClick={() => !reorderMode && toggle(it.id)}
                           >
                             <CheckBox on={checked[it.id]} />
                             <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
@@ -933,16 +1015,24 @@ function GearReckoner() {
                             >
                               {formatWeight(it.weight)}
                             </div>
-                            <button
-                              className="icon-btn"
-                              title="修改或刪除"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditor({ item: it });
-                              }}
-                            >
-                              <Pencil size={13} />
-                            </button>
+                            {reorderMode ? (
+                              <MoveButtons
+                                label="裝備"
+                                onUp={itemIndex > 0 && (() => moveGear(cat, it.id, -1))}
+                                onDown={itemIndex < cat.items.length - 1 && (() => moveGear(cat, it.id, 1))}
+                              />
+                            ) : (
+                              <button
+                                className="icon-btn"
+                                title="修改或刪除"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditor({ item: it });
+                                }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1329,6 +1419,27 @@ function GearReckoner() {
           onClose={() => setEditor(null)}
         />
       )}
+    </div>
+  );
+}
+
+// 整理模式的 ▲▼ 按鈕；onUp/onDown 傳 false 代表已經在最上/最下
+function MoveButtons({ label, onUp, onDown }) {
+  const style = (enabled) => ({
+    padding: 6,
+    opacity: enabled ? 1 : 0.25,
+    cursor: enabled ? "pointer" : "default",
+    border: `1px solid ${palette.line}`,
+    color: enabled ? palette.amber : palette.textFaint,
+  });
+  return (
+    <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+      <button className="icon-btn" style={style(onUp)} disabled={!onUp} onClick={onUp || undefined} title={`${label}上移`}>
+        <ChevronUp size={15} />
+      </button>
+      <button className="icon-btn" style={style(onDown)} disabled={!onDown} onClick={onDown || undefined} title={`${label}下移`}>
+        <ChevronDown size={15} />
+      </button>
     </div>
   );
 }

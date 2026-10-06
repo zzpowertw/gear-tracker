@@ -15,6 +15,7 @@ export const PRESET_CATEGORIES = [
   { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
   { key: "water", title: "水具", icon: "Droplet" },
   { key: "electronics", title: "電子照明", icon: "Flashlight" },
+  { key: "devices", title: "電子設備", icon: "Smartphone" },
   { key: "accessory", title: "配件", icon: "Glasses" },
   { key: "safety", title: "醫療安全", icon: "Cross" },
   { key: "other", title: "其他", icon: "Package" },
