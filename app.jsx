@@ -30,7 +30,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const DRAFT_KEY = "gear-draft"; // 目前畫面上的勾選狀態（只存本機，下次打開還在）
 
 const CATEGORIES = [
