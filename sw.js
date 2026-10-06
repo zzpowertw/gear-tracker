@@ -4,7 +4,7 @@
 // - 外部程式庫（固定版本號，不會變）：先用快取，加快開啟速度
 // 每次發佈新版請把 CACHE_VERSION 改成跟 app.jsx 的 APP_VERSION 一樣
 // ============================================================
-const CACHE_VERSION = "1.1.0";
+const CACHE_VERSION = "1.1.1";
 const CACHE = `gear-reckoner-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -22,7 +22,10 @@ const APP_SHELL = [
 const CDN_HOSTS = ["esm.sh", "unpkg.com", "www.gstatic.com", "fonts.googleapis.com", "fonts.gstatic.com"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(APP_SHELL)));
+  // cache: "reload" 跳過瀏覽器自己的暫存，確保存進來的是伺服器上的最新版
+  event.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(APP_SHELL.map((u) => new Request(u, { cache: "reload" }))))
+  );
   self.skipWaiting();
 });
 
@@ -51,7 +54,8 @@ self.addEventListener("fetch", (event) => {
 async function networkFirst(req) {
   const cache = await caches.open(CACHE);
   try {
-    const res = await fetch(req);
+    // no-cache：每次都向伺服器確認有沒有新版，避免拿到瀏覽器暫存的舊檔
+    const res = await fetch(req, { cache: "no-cache" });
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch (e) {
