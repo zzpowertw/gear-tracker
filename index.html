@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>登山裝備重量試算</title>
+    <meta name="description" content="葉董的登山裝備重量試算 App" />
+    <meta name="theme-color" content="#10161A" />
+
+    <!-- 安裝成 App 用的設定 -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="裝備試算" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap"
+    />
+
+    <!-- 外部程式庫的固定版本（import map：告訴瀏覽器 "react" 等名稱要去哪下載） -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?external=react",
+          "lucide-react": "https://esm.sh/lucide-react@0.460.0?external=react"
+        }
+      }
+    </script>
+    <!-- Babel：讓瀏覽器直接看得懂 .jsx，不需要在電腦上安裝建置工具 -->
+    <script
+      src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"
+      integrity="sha384-x/ilTFv/u/eu6YSmkFDZl5V5Mm/pkxxcVv2cVJOrr1J0rvILhMvRBCy6yA75wYBj"
+      crossorigin="anonymous"
+    ></script>
+
+    <style>
+      html, body { margin: 0; background: #10161A; color: #EDEDE6; }
+      body { padding-top: env(safe-area-inset-top); -webkit-tap-highlight-color: transparent; }
+      #boot { display: flex; align-items: center; justify-content: center; height: 100vh;
+        font-family: sans-serif; color: #93A69A; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div id="boot">載入中…</div></div>
+
+    <script type="text/babel" data-type="module" data-presets="react" src="app.jsx"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+      }
+    </script>
+  </body>
+</html>

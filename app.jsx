@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { createRoot } from "react-dom/client";
 import {
   Shirt,
   Footprints,
@@ -12,55 +13,31 @@ import {
   Loader2,
   History,
   FolderOpen,
+  Cloud,
+  CloudOff,
+  LogIn,
+  LogOut,
+  HardDrive,
 } from "lucide-react";
+import {
+  LAYER_ITEMS,
+  FOOTWEAR_ITEMS,
+  PACK_ITEMS,
+  ACCESSORY_ITEMS,
+  MAX_SCALE_G,
+  COMFORT_TARGET_G,
+} from "./gear-data.js";
+import * as store from "./storage.js";
 
-// ============================================================
-// 裝備資料表 —— 之後有新品項/新重量，直接在這裡增修即可
-// weight 單位：公克 (g)
-// estimated: true 表示官網無精確數據，屬於估算值
-// ============================================================
-const LAYER_ITEMS = [
-  { id: "storm-cruiser", name: "Montbell Storm Cruiser 硬殼外套", color: "黃", weight: 269, estimated: false, defaultOn: true },
-  { id: "mt500", name: "迪卡農 MT500 美麗諾長袖", color: "橘", weight: 216, estimated: false, defaultOn: true },
-  { id: "wind-parka", name: "Montbell U.L. Stretch Wind Parka", color: "橘", weight: 117, estimated: false, defaultOn: true },
-  { id: "down-parka", name: "Montbell Superior Down Parka 800FP", color: "—", weight: 249, estimated: false, defaultOn: false, owned: false },
-  { id: "cove-beach-pant", name: "Columbia Cove Beach Pant 登山褲", color: "橘黑", weight: 305, estimated: false, defaultOn: true },
-  { id: "decathlon-shorts", name: "迪卡農登山短褲", color: "深灰", weight: 300, estimated: false, defaultOn: false },
-];
-
-const FOOTWEAR_ITEMS = [
-  { id: "speedgoat7", name: "Hoka Speedgoat 7", color: "黑白", weight: 548, estimated: false, note: "雙腳合計・輕量跑鞋" },
-  { id: "olympus6", name: "Altra Olympus 6 Hike Low GTX", color: "黑", weight: 816, estimated: false, note: "雙腳合計・防水登山鞋" },
-];
-
-const PACK_ITEMS = [
-  { id: "hmg-southwest40", name: "Hyperlite Mountain Gear Southwest 40L 背包", color: "白", weight: 841, estimated: false, defaultOn: true, note: "M 尺寸官方規格" },
-  { id: "adv-vest", name: "Salomon ADV Cross/Skin 15 攻頂包", color: "白", weight: 320, estimated: true, defaultOn: false },
-  { id: "mt900-poles", name: "迪卡農 MT900 摺疊登山杖", color: "—", weight: 550, estimated: false, defaultOn: true, note: "單支 275g × 2" },
-  { id: "hydrapak", name: "Hydrapak Contour 2L 水袋", color: "—", weight: 142, estimated: false, defaultOn: true, note: "空重" },
-  { id: "naturehike-mat", name: "Naturehike 羽骨R3.6超輕自動充氣睡墊", color: "黃", weight: 610, estimated: false, defaultOn: true },
-];
-
-const ACCESSORY_ITEMS = [
-  { id: "trail-hat", name: "Hoka Trail Run Hat", color: "黑", weight: 42, estimated: true, defaultOn: true },
-  { id: "urban3", name: "VIGHT Urban 3 太陽眼鏡", color: "冰石藍", weight: 32, estimated: false, defaultOn: true },
-  { id: "headlamp", name: "Nitecore NU25 MCT UL 頭燈", color: "—", weight: 47, estimated: false, defaultOn: true, owned: true },
-  { id: "smartwool-socks", name: "Smartwool羊毛襪", color: "灰色 香菇/魚/斧頭", weight: 66.5, estimated: false, defaultOn: true },
-  { id: "darn-tough-socks", name: "Darn Tough 羊毛襪", color: "外星人", weight: 77, estimated: false, defaultOn: true, owned: true },
-  { id: "naturehike-pillow", name: "Naturehike 充氣枕頭", color: "—", weight: 110, estimated: false, defaultOn: true },
-  { id: "sts-aeros-pillow", name: "Sea to Summit Aeros Pillow Premium", color: "深藍", weight: 150, estimated: false, defaultOn: false, note: "L 尺寸・包裝標示" },
-  { id: "beams-neckwarmer", name: "Beams 圍脖", color: "—", weight: 47, estimated: false, defaultOn: true },
-];
+// 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
+const APP_VERSION = "1.0.0";
+const DRAFT_KEY = "gear-draft"; // 目前畫面上的勾選狀態（只存本機，下次打開還在）
 
 const CATEGORIES = [
   { key: "layer", title: "衣物層", icon: Shirt, items: LAYER_ITEMS },
   { key: "pack", title: "背包與補給", icon: Backpack, items: PACK_ITEMS },
   { key: "accessory", title: "隨身配件", icon: Glasses, items: ACCESSORY_ITEMS },
 ];
-
-const MAX_SCALE_G = 9000; // 山岳量規的滿刻度（供視覺化用）
-const COMFORT_TARGET_G = 7000; // 葉董設定的舒適重量目標
-const RECORDS_KEY = "gear-weight-records";
 
 function formatWeight(g) {
   return g >= 1000 ? `${(g / 1000).toFixed(2)} kg` : `${g} g`;
@@ -206,9 +183,21 @@ function drawSnapshotToPng({ title, date, sections, total, footwearLine }) {
   return canvas;
 }
 
-function downloadCanvas(canvas, filename) {
-  canvas.toBlob((blob) => {
+function downloadCanvas(canvas, title) {
+  const filename = `${title.replace(/[\\/:*?"<>|]/g, "_")}.png`;
+  canvas.toBlob(async (blob) => {
     if (!blob) return;
+    // 手機上用系統「分享」選單，才能存到相簿或傳到 LINE
+    const file = new File([blob], filename, { type: "image/png" });
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title });
+        return;
+      } catch (e) {
+        if (e.name === "AbortError") return; // 使用者取消分享
+      }
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -220,47 +209,84 @@ function downloadCanvas(canvas, filename) {
   }, "image/png");
 }
 
-export default function GearWeightCalculator() {
+function loadDraft() {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function GearWeightCalculator() {
   const initialChecked = {};
   [...LAYER_ITEMS, ...PACK_ITEMS, ...ACCESSORY_ITEMS].forEach((it) => {
     initialChecked[it.id] = it.defaultOn;
   });
+  const [draft] = useState(loadDraft);
 
-  const [checked, setChecked] = useState(initialChecked);
-  const [footwear, setFootwear] = useState(FOOTWEAR_ITEMS[0].id);
-  const [title, setTitle] = useState("");
+  // 新增到 gear-data.js 的品項沒有存在草稿裡，沿用它的 defaultOn
+  const [checked, setChecked] = useState({ ...initialChecked, ...draft.checked });
+  const [footwear, setFootwear] = useState(
+    FOOTWEAR_ITEMS.some((f) => f.id === draft.footwear) ? draft.footwear : FOOTWEAR_ITEMS[0].id
+  );
+  const [title, setTitle] = useState(draft.title || "");
 
   // 自訂欄位（每次可能不同、或是租借品項）
-  const [customItems, setCustomItems] = useState([]);
+  const [customItems, setCustomItems] = useState(draft.customItems || []);
   const [newItemName, setNewItemName] = useState("");
   const [newItemWeight, setNewItemWeight] = useState("");
 
-  // 儲存的裝備紀錄（跨裝置保存在使用者個人儲存空間）
+  // 登入狀態：undefined = 確認中、null = 未登入/本機模式、物件 = 已登入
+  const [user, setUser] = useState(undefined);
+  const [online, setOnline] = useState(navigator.onLine);
+
+  // 儲存的裝備紀錄（登入後存在雲端，跨裝置同步）
   const [records, setRecords] = useState([]);
   const [recordsLoading, setRecordsLoading] = useState(true);
-  const [recordsError, setRecordsError] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => store.watchAuth(setUser), []);
+
   useEffect(() => {
-    let cancelled = false;
-    async function loadRecords() {
-      try {
-        const result = await window.storage.get(RECORDS_KEY, false);
-        if (!cancelled && result && result.value) {
-          setRecords(JSON.parse(result.value));
-        }
-      } catch (e) {
-        // key 不存在時屬正常情況（尚無任何紀錄）
-        if (!cancelled) setRecordsError(false);
-      } finally {
-        if (!cancelled) setRecordsLoading(false);
-      }
-    }
-    loadRecords();
+    if (user === undefined) return;
+    setRecordsLoading(true);
+    return store.watchRecords(user, (list) => {
+      setRecords(list);
+      setRecordsLoading(false);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
     return () => {
-      cancelled = true;
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ checked, footwear, title, customItems }));
+    } catch (e) {
+      // 本機儲存空間不可用（例如無痕模式），不影響使用
+    }
+  }, [checked, footwear, title, customItems]);
+
+  const handleSignIn = async () => {
+    try {
+      await store.signIn();
+    } catch (e) {
+      alert(`登入失敗：${e.message}`);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (confirm("要登出嗎？登出後這台裝置看不到雲端紀錄，重新登入就會回來。")) {
+      await store.signOut();
+    }
+  };
 
   const toggle = (id) => setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -339,7 +365,7 @@ export default function GearWeightCalculator() {
   const handleExportImage = () => {
     const snap = buildSnapshot();
     const canvas = drawSnapshotToPng(snap);
-    downloadCanvas(canvas, `${snap.title}.png`);
+    downloadCanvas(canvas, snap.title);
   };
 
   const handleSaveRecord = async () => {
@@ -353,14 +379,10 @@ export default function GearWeightCalculator() {
       customItems,
       total: grandTotal,
     };
-    const nextRecords = [record, ...records];
     try {
-      const result = await window.storage.set(RECORDS_KEY, JSON.stringify(nextRecords), false);
-      if (result) {
-        setRecords(nextRecords);
-      }
+      await store.saveRecord(user, record);
     } catch (e) {
-      // 儲存失敗，維持原本狀態，不更新畫面
+      alert(`儲存失敗：${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -395,31 +417,30 @@ export default function GearWeightCalculator() {
       sections: sections.filter((s) => s.lines.length > 0),
       total: record.total,
     });
-    downloadCanvas(canvas, `${record.title}.png`);
+    downloadCanvas(canvas, record.title);
   };
 
-  const handleDeleteRecord = async (id) => {
-    const nextRecords = records.filter((r) => r.id !== id);
+  const handleDeleteRecord = async (record) => {
+    if (!confirm(`確定要刪除「${record.title}」這筆紀錄嗎？`)) return;
     try {
-      const result = await window.storage.set(RECORDS_KEY, JSON.stringify(nextRecords), false);
-      if (result) setRecords(nextRecords);
+      await store.deleteRecord(user, record.id);
     } catch (e) {
-      // 刪除失敗則不變更畫面
+      alert(`刪除失敗：${e.message}`);
     }
   };
 
   return (
     <div
+      className="page"
       style={{
         background: palette.bg,
         color: palette.text,
-        fontFamily: "'Inter', sans-serif",
-        minHeight: "100%",
-        padding: "28px 20px",
+        fontFamily: "'Inter', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif",
+        minHeight: "100vh",
+        padding: "28px 16px",
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap');
         * { box-sizing: border-box; }
         .item-row {
           display: flex; align-items: center; gap: 10px;
@@ -480,6 +501,18 @@ export default function GearWeightCalculator() {
           outline: none;
         }
         .mini-input:focus { border-color: ${palette.amber}; }
+        .mobile-total-bar {
+          position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+          background: ${palette.panel};
+          border-top: 1px solid ${palette.line};
+        }
+        .page { padding-bottom: 90px !important; }
+        @media (min-width: 900px) {
+          .mobile-total-bar { display: none; }
+          .page { padding-bottom: 28px !important; }
+        }
         .record-card {
           border: 1px solid ${palette.line}; border-radius: 10px;
           padding: 12px; background: ${palette.panelAlt};
@@ -496,14 +529,25 @@ export default function GearWeightCalculator() {
         <div style={{ marginBottom: 20 }}>
           <div
             style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 12,
-              letterSpacing: "0.12em",
-              color: palette.moss,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
               marginBottom: 6,
             }}
           >
-            葉董裝備清單 · GEAR RECKONER
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 12,
+                letterSpacing: "0.12em",
+                color: palette.moss,
+              }}
+            >
+              葉董裝備清單 · GEAR RECKONER
+            </div>
+            <SyncStatus user={user} online={online} onSignIn={handleSignIn} onSignOut={handleSignOut} />
           </div>
           <h1
             style={{
@@ -517,7 +561,7 @@ export default function GearWeightCalculator() {
             登山裝備重量試算
           </h1>
           <p style={{ color: palette.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 }}>
-            勾選這次要帶的裝備，右側即時算出總重。鞋款請擇一穿著的款式。
+            勾選這次要帶的裝備，即時算出總重。鞋款請擇一穿著的款式。
           </p>
 
           {/* 標題輸入 + 動作按鈕 */}
@@ -952,7 +996,7 @@ export default function GearWeightCalculator() {
                         <button
                           className="action-btn"
                           style={{ padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}
-                          onClick={() => handleDeleteRecord(r.id)}
+                          onClick={() => handleDeleteRecord(r)}
                         >
                           <Trash2 size={12} /> 刪除
                         </button>
@@ -1168,12 +1212,110 @@ export default function GearWeightCalculator() {
             >
               <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
               <span>
-                部分品項（羊毛長袖、帽子、攻頂包）為估算值，正式出發前建議用秤實測校正。長短褲、雨褲、行動糧等品項待補充後可再更新此表。紀錄會保存在你的個人儲存空間中，僅你可見。
+                部分品項（羊毛長袖、帽子、攻頂包）為估算值，正式出發前建議用秤實測校正。長短褲、雨褲、行動糧等品項待補充後可再更新此表。
+                {user
+                  ? "紀錄存在你的 Google 帳號雲端空間，手機和電腦登入同一帳號即自動同步，僅你可見。"
+                  : "目前紀錄只存在這台裝置。"}
               </span>
             </div>
           </div>
         </div>
+
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            color: palette.textFaint,
+            fontFamily: "'JetBrains Mono', monospace",
+            marginTop: 28,
+          }}
+        >
+          Gear Reckoner v{APP_VERSION}
+        </div>
+      </div>
+
+      {/* 手機版：底部固定顯示總重 */}
+      <div className="mobile-total-bar">
+        <span style={{ fontSize: 12, color: palette.textMuted }}>目前總重</span>
+        <span
+          style={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: 22,
+            fontWeight: 700,
+            color: overTarget ? palette.warn : palette.amber,
+          }}
+        >
+          {(grandTotal / 1000).toFixed(2)}
+          <span style={{ fontSize: 13, color: palette.textMuted }}> kg</span>
+        </span>
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: overTarget ? palette.warn : palette.moss,
+            marginLeft: "auto",
+          }}
+        >
+          {overTarget ? `超標 ${formatWeight(deltaFromTarget)}` : `餘裕 ${formatWeight(deltaFromTarget)}`}
+        </span>
       </div>
     </div>
   );
 }
+
+// ------------------------------------------------------------
+// 右上角的同步狀態：本機模式 / 登入按鈕 / 已同步
+// ------------------------------------------------------------
+function SyncStatus({ user, online, onSignIn, onSignOut }) {
+  const chip = {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    padding: "5px 10px",
+    borderRadius: 20,
+    border: `1px solid ${palette.line}`,
+    background: palette.panel,
+    color: palette.textMuted,
+  };
+
+  if (!store.cloudEnabled) {
+    return (
+      <div style={chip} title="尚未設定 firebase-config.js，紀錄只存在這台裝置">
+        <HardDrive size={13} /> 本機模式
+      </div>
+    );
+  }
+  if (user === undefined) {
+    return (
+      <div style={chip}>
+        <Loader2 size={13} className="spin" /> 連線中…
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <button className="action-btn primary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={onSignIn}>
+        <LogIn size={13} /> 用 Google 登入同步
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ ...chip, color: online ? palette.moss : palette.amber }} title={user.email}>
+        {online ? <Cloud size={13} /> : <CloudOff size={13} />}
+        {online ? "已同步" : "離線中・連線後自動同步"}
+      </div>
+      <button
+        className="action-btn"
+        style={{ padding: "5px 8px", fontSize: 12 }}
+        onClick={onSignOut}
+        title={`登出 ${user.email}`}
+      >
+        <LogOut size={13} />
+      </button>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<GearWeightCalculator />);

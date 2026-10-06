@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#10161A"/>
+  <path d="M64 400 L184 196 L244 268 L324 128 L392 236 L448 400 Z" fill="#7FA88F"/>
+  <path d="M64 400 L184 196 L244 268 L324 128 L392 236 L448 400 Z" fill="#E3A542" clip-path="url(#c)"/>
+  <clipPath id="c"><rect x="0" y="300" width="512" height="200"/></clipPath>
+  <line x1="40" y1="300" x2="472" y2="300" stroke="#D9634B" stroke-width="10" stroke-dasharray="22 14"/>
+</svg>
