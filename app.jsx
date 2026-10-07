@@ -75,7 +75,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.6.3";
+const APP_VERSION = "3.6.4";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -1207,7 +1207,7 @@ function GearReckoner() {
             <div style={{ ...monoStyle, fontSize: 12, letterSpacing: "0.12em", color: palette.moss }}>
               {owner} · GEAR RECKONER
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
               <SyncStatus
                 user={user}
                 syncState={syncState}
@@ -2512,6 +2512,16 @@ function LibraryPicker({ activity, gear, categories, onAdd, onClose }) {
   );
 }
 
+// 雲裡面一個勾（圖示庫這版沒有，自己畫；線條粗細跟其他圖示一致）
+function CloudCheckIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+      <path d="m9 13.5 2 2 4-4" />
+    </svg>
+  );
+}
+
 // ------------------------------------------------------------
 // 右上角的同步狀態：本機模式 / 登入按鈕 / 已同步
 // ------------------------------------------------------------
@@ -2552,22 +2562,22 @@ function SyncStatus({ user, syncState, lastConfirmed, onSync, onSignIn, onSignOu
   }
 
   const status = {
-    offline: { color: palette.amber, icon: <CloudOff size={13} />, text: "離線中・連線後自動同步" },
-    syncing: { color: palette.textMuted, icon: <Loader2 size={13} className="spin" />, text: "同步中…" },
-    uploading: { color: palette.amber, icon: <Loader2 size={13} className="spin" />, text: "上傳中…" },
-    connecting: { color: palette.textMuted, icon: <Loader2 size={13} className="spin" />, text: "連線中…" },
+    offline: { color: palette.amber, tip: "離線中，連線後自動同步" },
+    syncing: { color: palette.textMuted, tip: "同步中…" },
+    uploading: { color: palette.amber, tip: "有資料還沒上傳，上傳中…" },
+    connecting: { color: palette.textMuted, tip: "連線中…" },
     synced: {
       color: palette.moss,
-      icon: <Cloud size={13} />,
-      text: lastConfirmed ? `已同步 · ${formatClock(lastConfirmed)} 確認` : "已同步",
+      tip: lastConfirmed ? `已同步，${formatClock(lastConfirmed)} 跟雲端確認過` : "已同步",
     },
   }[syncState];
+  const synced = syncState === "synced";
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ ...chip, color: status.color }} title={user.email}>
-        {status.icon}
-        {status.text}
+      <div style={{ ...chip, color: status.color, padding: "5px 9px" }} title={`${status.tip}（${user.email}）`}>
+        {synced ? <CloudCheckIcon size={16} /> : <Cloud size={16} />}
+        {synced && lastConfirmed && <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatClock(lastConfirmed)}</span>}
       </div>
       <button
         className="action-btn"
