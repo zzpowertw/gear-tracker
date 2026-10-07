@@ -75,7 +75,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.6.1";
+const APP_VERSION = "3.6.2";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -974,7 +974,6 @@ function GearReckoner() {
         .item-row:hover { background: ${palette.panelAlt}; }
         .item-row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
         .item-row.drag-chosen { border-color: ${palette.amber}; background: ${palette.panelAlt}; }
-        .item-row.on { border-color: ${palette.line}; }
         .item-row.static { cursor: default; }
         .checkbox {
           width: 16px; height: 16px; border-radius: 4px;
@@ -1271,14 +1270,11 @@ function GearReckoner() {
                 title={checkedCount === 0 ? "先勾選要帶的裝備" : undefined}
               >
                 <Backpack size={14} />
-                {(() => {
-                  const n = currentItems().filter((i) => packed[i.id]).length;
-                  return n > 0 ? `繼續打包 ${n}/${checkedCount}` : `開始打包（${checkedCount} 件）`;
-                })()}
+                {currentItems().some((i) => packed[i.id]) ? "繼續打包" : "開始打包"}
               </button>
               <button className="action-btn primary" onClick={handleSaveRecord} disabled={saving}>
                 {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
-                儲存這筆紀錄
+                儲存
               </button>
             </div>
           )}
@@ -1532,7 +1528,7 @@ function GearReckoner() {
                 </div>
               ) : sortedRecords.length === 0 ? (
                 <div style={{ color: palette.textFaint, fontSize: 13 }}>
-                  還沒有任何儲存紀錄，填好標題後按「儲存這筆紀錄」就會出現在這裡。
+                  還沒有任何儲存紀錄，填好標題後按「儲存」就會出現在這裡。
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2566,12 +2562,12 @@ function SyncStatus({ user, syncState, lastConfirmed, onSync, onSignIn, onSignOu
       </div>
       <button
         className="action-btn"
-        style={{ padding: "5px 10px", fontSize: 12 }}
+        style={{ padding: "5px 8px", fontSize: 12 }}
         onClick={onSync}
         disabled={syncState === "syncing"}
         title="立即同步"
       >
-        <RefreshCw size={13} className={syncState === "syncing" ? "spin" : ""} /> 同步
+        <RefreshCw size={13} className={syncState === "syncing" ? "spin" : ""} />
       </button>
       <button className="action-btn" style={{ padding: "5px 8px", fontSize: 12 }} onClick={onSignOut} title={`登出 ${user.email}`}>
         <LogOut size={13} />
