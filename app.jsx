@@ -53,6 +53,9 @@ import {
   Settings,
   Star,
   Bath,
+  ChevronRight,
+  ChevronLeft,
+  Palette,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -69,7 +72,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.4.0";
+const APP_VERSION = "3.5.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -1113,6 +1116,12 @@ function GearReckoner() {
           border-radius: 6px; font-size: 13px; font-weight: 600; color: ${palette.textMuted};
         }
         .tab-btn.active { background: ${palette.panelAlt}; color: ${palette.amber}; }
+        .menu-row {
+          display: flex; align-items: center; gap: 10px; cursor: pointer;
+          padding: 11px 10px; border-radius: 9px;
+          border: 1px solid ${palette.line}; background: ${palette.panelAlt};
+        }
+        .menu-row:hover { border-color: ${palette.amber}; }
         .field-label { font-size: 12px; color: ${palette.textMuted}; margin: 14px 0 6px; display: block; }
       `}</style>
 
@@ -1811,74 +1820,115 @@ function GearReckoner() {
 }
 
 // ------------------------------------------------------------
-// 設定：佈景主題
+// 設定：第一層是選單，點進去是各個設定頁
+// 之後要加新的設定，在 pages 加一項、再加一個對應的頁面即可
 // ------------------------------------------------------------
 function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryReorder, onClose }) {
-  useEscape(onClose);
+  const [page, setPage] = useState(null); // null = 選單
+  useEscape(() => (page ? setPage(null) : onClose()));
+
+  const pages = [
+    {
+      key: "theme",
+      title: "佈景主題",
+      icon: Palette,
+      desc: THEME_OPTIONS.find((t) => t.key === themeKey)?.title,
+    },
+    { key: "categories", title: "類別排序", icon: ArrowUpDown, desc: `${categories.length} 個類別` },
+  ];
+  const current = pages.find((p) => p.key === page);
+
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17 }}>設定</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
+          {current && (
+            <button className="icon-btn" style={{ marginLeft: -6 }} onClick={() => setPage(null)} title="回到設定">
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, flex: 1 }}>
+            {current ? current.title : "設定"}
+          </span>
           <button className="icon-btn" onClick={onClose} title="關閉">
             <X size={18} />
           </button>
         </div>
-        <span className="field-label">佈景主題</span>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-          {THEME_OPTIONS.map((t) => {
-            const c = THEMES[t.key];
-            const on = t.key === themeKey;
-            return (
-              <div
-                key={t.key}
-                onClick={() => onChooseTheme(t.key)}
-                style={{
-                  cursor: "pointer",
-                  borderRadius: 12,
-                  padding: 10,
-                  background: c.bg,
-                  border: `2px solid ${on ? c.amber : c.line}`,
-                  color: c.text,
-                }}
-              >
-                <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-                  {[c.panel, c.amber, c.moss].map((col, i) => (
-                    <span key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: col, border: `1px solid ${c.line}` }} />
-                  ))}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
-                  {on && <Check size={13} style={{ color: c.amber }} />}
-                  {t.title}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 8, marginBottom: 0 }}>
-          選擇會存在帳號裡，手機和電腦會用同一個主題。
-        </p>
 
-        <span className="field-label">類別排序</span>
-        <p style={{ fontSize: 12, color: palette.textFaint, margin: "0 0 6px" }}>
-          按住左邊的 <GripVertical size={11} style={{ verticalAlign: -1 }} /> 拖到想要的位置，所有活動共用這個順序。
-        </p>
-        <SortableList onMove={onCategoryReorder} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {categories.map((cat) => {
-            const Icon = ICONS[cat.icon] || Tag;
-            const n = gear.filter((g) => g.category === cat.key).length;
-            return (
-              <div key={cat.key} className="drag-row">
-                <DragHandle />
-                <Icon size={15} style={{ color: palette.moss }} />
-                <span style={{ flex: 1, fontWeight: 600, fontSize: 13.5 }}>{cat.title}</span>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: palette.textFaint }}>
-                  {n} 件
-                </span>
+        {!current && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {pages.map((p) => (
+              <div key={p.key} className="menu-row" onClick={() => setPage(p.key)}>
+                <p.icon size={17} style={{ color: palette.moss }} />
+                <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{p.title}</span>
+                <span style={{ fontSize: 12.5, color: palette.textFaint }}>{p.desc}</span>
+                <ChevronRight size={16} style={{ color: palette.textFaint }} />
               </div>
-            );
-          })}
-        </SortableList>
+            ))}
+          </div>
+        )}
+
+        {page === "theme" && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {THEME_OPTIONS.map((t) => {
+                const c = THEMES[t.key];
+                const on = t.key === themeKey;
+                return (
+                  <div
+                    key={t.key}
+                    onClick={() => onChooseTheme(t.key)}
+                    style={{
+                      cursor: "pointer",
+                      borderRadius: 12,
+                      padding: 10,
+                      background: c.bg,
+                      border: `2px solid ${on ? c.amber : c.line}`,
+                      color: c.text,
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                      {[c.panel, c.amber, c.moss].map((col, i) => (
+                        <span key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: col, border: `1px solid ${c.line}` }} />
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                      {on && <Check size={13} style={{ color: c.amber }} />}
+                      {t.title}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 8, marginBottom: 0 }}>
+              選擇會存在帳號裡，手機和電腦會用同一個主題。
+            </p>
+          </>
+        )}
+
+        {page === "categories" && (
+          <>
+            <p style={{ fontSize: 12, color: palette.textFaint, margin: "0 0 8px" }}>
+              按住左邊的 <GripVertical size={11} style={{ verticalAlign: -1 }} /> 拖到想要的位置，所有活動共用這個順序。
+            </p>
+            <SortableList onMove={onCategoryReorder} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {categories.map((cat) => {
+                const Icon = ICONS[cat.icon] || Tag;
+                const n = gear.filter((g) => g.category === cat.key).length;
+                return (
+                  <div key={cat.key} className="drag-row">
+                    <DragHandle />
+                    <Icon size={15} style={{ color: palette.moss }} />
+                    <span style={{ flex: 1, fontWeight: 600, fontSize: 13.5 }}>{cat.title}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: palette.textFaint }}>
+                      {n} 件
+                    </span>
+                  </div>
+                );
+              })}
+            </SortableList>
+          </>
+        )}
       </div>
     </div>
   );
