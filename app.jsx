@@ -76,7 +76,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.7.1";
+const APP_VERSION = "3.7.2";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -987,8 +987,6 @@ function GearReckoner() {
         :root {
           /* 底部：只保留跟 Home 橫條錯開需要的距離（原本整段安全區＋內距，下巴太長） */
           --bottom-pad: max(10px, calc(env(safe-area-inset-bottom) - 16px));
-          /* 頂端：iOS 26 Liquid Glass 的模糊帶會延伸到狀態列下方，固定的活動列要再往下避開 */
-          --top-blur-gap: 14px;
         }
         button { font-family: inherit; }
         html { scrollbar-width: thin; scrollbar-color: ${palette.line} transparent; }
@@ -1129,8 +1127,6 @@ function GearReckoner() {
           display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
           position: sticky; top: env(safe-area-inset-top); z-index: 9;
           margin: 0 -12px 10px; padding: 6px 12px; background: ${palette.bg};
-          padding-top: calc(6px + var(--top-blur-gap));
-          margin-top: -10px; /* 抵掉上一列的下間距，平常位置看起來不變；不能再多，否則會蓋到右上角按鈕 */
         }
         .safe-top-cover {
           position: fixed; top: 0; left: 0; right: 0; z-index: 12;
