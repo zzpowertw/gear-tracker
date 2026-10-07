@@ -66,7 +66,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.1.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -98,18 +98,48 @@ function formatDate(iso) {
   ).padStart(2, "0")}`;
 }
 
-const palette = {
-  bg: "#10161A",
-  panel: "#1A2420",
-  panelAlt: "#212D27",
-  line: "#324139",
-  amber: "#E3A542",
-  moss: "#7FA88F",
-  text: "#EDEDE6",
-  textMuted: "#93A69A",
-  textFaint: "#5D6E64",
-  warn: "#D9634B",
+// ------------------------------------------------------------
+// 主題色：每個活動一套，切換活動時整個畫面跟著換色
+// amber = 主色（按鈕、重點數字）、moss = 輔色（圖示、進度條）、onAccent = 主色按鈕上的文字
+// tag = 這個活動在「全部裝備」標籤上的代表色
+// ------------------------------------------------------------
+const THEMES = {
+  hiking: {
+    bg: "#10161A", panel: "#1A2420", panelAlt: "#212D27", line: "#324139",
+    amber: "#E3A542", moss: "#7FA88F", onAccent: "#10161A",
+    text: "#EDEDE6", textMuted: "#93A69A", textFaint: "#5D6E64", warn: "#D9634B",
+    tag: "#E3A542",
+  },
+  diving: {
+    bg: "#0A1520", panel: "#10212F", panelAlt: "#15293B", line: "#23415A",
+    amber: "#3DB7E4", moss: "#5BC6C0", onAccent: "#06121C",
+    text: "#E4EFF7", textMuted: "#8DAAC2", textFaint: "#4E6982", warn: "#E26D5C",
+    tag: "#3DB7E4",
+  },
+  skiing: {
+    bg: "#E9EDF1", panel: "#F8FAFB", panelAlt: "#EEF2F5", line: "#D2D9E0",
+    amber: "#3A5A7A", moss: "#6F8CA8", onAccent: "#FFFFFF",
+    text: "#1C2630", textMuted: "#5B6876", textFaint: "#97A3AF", warn: "#C4513A",
+    tag: "#C9D2DB",
+  },
+  camping: {
+    bg: "#16110D", panel: "#211913", panelAlt: "#2A2019", line: "#44362A",
+    amber: "#D99A5B", moss: "#B5A27A", onAccent: "#16110D",
+    text: "#F2EADF", textMuted: "#B39F8A", textFaint: "#6F5E4F", warn: "#E0674D",
+    tag: "#C9894B",
+  },
+  all: {
+    bg: "#131417", panel: "#1C1E23", panelAlt: "#24262D", line: "#363944",
+    amber: "#AE9CF5", moss: "#8E96B0", onAccent: "#131417",
+    text: "#ECECF1", textMuted: "#9A9EAE", textFaint: "#5F6372", warn: "#E0675A",
+    tag: "#AE9CF5",
+  },
 };
+
+// 畫面上用 CSS 變數，切換主題時所有地方自動換色
+const palette = Object.fromEntries(Object.keys(THEMES.hiking).map((k) => [k, `var(--${k})`]));
+const themeVars = (key) =>
+  Object.fromEntries(Object.entries(THEMES[key] || THEMES.hiking).map(([k, v]) => [`--${k}`, v]));
 
 const fontStack =
   '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif';
@@ -121,7 +151,8 @@ const activityOf = (key) => ACTIVITIES.find((a) => a.key === key) || ACTIVITIES[
 // sections: [{ title, lines: [{ name, weight }] }]
 // mode: "weight" 顯示總重；"list" 顯示件數
 // ------------------------------------------------------------
-function drawSnapshotToPng({ owner, title, date, sections, total, mode, count }) {
+function drawSnapshotToPng({ owner, title, date, sections, total, mode, count, theme }) {
+  const palette = THEMES[theme] || THEMES.hiking;
   const width = 760;
   const rowH = 30;
   const lineCount = sections.reduce((n, s) => n + 1 + s.lines.length, 0);
@@ -367,6 +398,14 @@ function GearReckoner() {
       // 不影響使用
     }
     setReorderMode(false);
+    // 主題色也掛到最外層 <html>，整頁捲軸才吃得到
+    const root = document.documentElement;
+    Object.entries(themeVars(view)).forEach(([k, v]) => root.style.setProperty(k, v));
+    const bg = (THEMES[view] || THEMES.hiking).bg;
+    document.body.style.background = bg;
+    root.style.background = bg;
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute("content", bg);
   }, [view]);
 
   useEffect(() => store.watchAuth(setUser), []);
@@ -738,6 +777,7 @@ function GearReckoner() {
       total: grandTotal,
       mode: activity.mode,
       count: items.length,
+      theme: view,
     });
   };
 
@@ -788,6 +828,7 @@ function GearReckoner() {
       total: record.total,
       mode: activityOf(record.activity).mode,
       count: record.items.length,
+      theme: record.activity,
     });
 
   const handleDeleteRecord = (record) => {
@@ -866,6 +907,8 @@ function GearReckoner() {
     <div
       className="page"
       style={{
+        ...themeVars(view),
+        transition: "background-color 0.25s",
         background: palette.bg,
         color: palette.text,
         fontFamily: "'Inter', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif",
@@ -876,9 +919,16 @@ function GearReckoner() {
       <style>{`
         * { box-sizing: border-box; }
         button { font-family: inherit; }
+        html { scrollbar-width: thin; scrollbar-color: ${palette.line} transparent; }
+        .sheet { scrollbar-width: thin; scrollbar-color: ${palette.line} transparent; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: ${palette.line}; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+        ::-webkit-scrollbar-thumb:hover { background: ${palette.textFaint}; background-clip: padding-box; }
+        .sheet::-webkit-scrollbar-track { margin: 14px 0; }
         .item-row {
           display: flex; align-items: center; gap: 10px;
-          padding: 9px 10px; border-radius: 8px;
+          padding: 7px 10px; border-radius: 8px;
           border: 1px solid transparent;
           cursor: pointer; transition: background 0.15s, border-color 0.15s;
         }
@@ -914,7 +964,7 @@ function GearReckoner() {
           transition: all 0.15s; white-space: nowrap;
         }
         .action-btn:hover { border-color: ${palette.amber}; }
-        .action-btn.primary { background: ${palette.amber}; border-color: ${palette.amber}; color: ${palette.bg}; }
+        .action-btn.primary { background: ${palette.amber}; border-color: ${palette.amber}; color: ${palette.onAccent}; }
         .action-btn.danger { color: ${palette.warn}; }
         .action-btn.danger:hover { border-color: ${palette.warn}; }
         .action-btn:disabled { opacity: 0.5; cursor: default; }
@@ -999,7 +1049,7 @@ function GearReckoner() {
           border: 1.5px solid ${palette.line}; background: ${palette.panel};
           color: ${palette.textMuted}; font-size: 13.5px; font-weight: 600;
         }
-        .act-tab.active { border-color: ${palette.amber}; color: ${palette.bg}; background: ${palette.amber}; }
+        .act-tab.active { border-color: ${palette.amber}; color: ${palette.onAccent}; background: ${palette.amber}; }
         .act-tab .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.75; }
         .act-chip {
           display: inline-flex; align-items: center; gap: 5px;
@@ -1013,6 +1063,13 @@ function GearReckoner() {
           padding: 1px 7px; border-radius: 20px; font-size: 10.5px; font-weight: 600;
           border: 1px solid ${palette.line}; color: ${palette.textMuted}; white-space: nowrap;
         }
+        .act-dots { display: flex; gap: 3px; flex-shrink: 0; }
+        .act-dot {
+          width: 20px; height: 20px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          border: 1.5px solid currentColor; background: ${palette.panelAlt};
+        }
+        .act-dot.none { border-style: dashed; color: ${palette.textFaint}; font-size: 11px; font-weight: 700; }
         .drag-row {
           display: flex; align-items: center; gap: 10px;
           padding: 10px; border-radius: 8px;
@@ -1062,14 +1119,16 @@ function GearReckoner() {
           {/* 活動切換 */}
           <div className="act-bar">
             <div className={`act-tab ${isLibrary ? "active" : ""}`} onClick={() => setView(ALL)}>
-              <LayoutGrid size={15} /> 全部裝備 <span className="count">{gear.length}</span>
+              <LayoutGrid size={15} style={isLibrary ? undefined : { color: THEMES.all.tag }} /> 全部裝備{" "}
+              <span className="count">{gear.length}</span>
             </div>
             {ACTIVITIES.map((a) => {
               const Icon = ICONS[a.icon];
               const n = gear.filter((g) => g.activities.includes(a.key)).length;
               return (
                 <div key={a.key} className={`act-tab ${view === a.key ? "active" : ""}`} onClick={() => setView(a.key)}>
-                  <Icon size={15} /> {a.title} <span className="count">{n}</span>
+                  <Icon size={15} style={view === a.key ? undefined : { color: THEMES[a.key].tag }} /> {a.title}{" "}
+                  <span className="count">{n}</span>
                 </div>
               );
             })}
@@ -1087,7 +1146,7 @@ function GearReckoner() {
               gap: 10,
             }}
           >
-            <ViewIcon size={26} color={palette.amber} />
+            <ViewIcon size={26} style={{ color: palette.amber }} />
             {pageTitle}
           </h1>
           <p style={{ color: palette.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 }}>{pageHint}</p>
@@ -1124,7 +1183,7 @@ function GearReckoner() {
               </div>
             ) : viewGear.length === 0 ? (
               <section style={{ ...panelStyle, textAlign: "center", padding: "32px 20px" }}>
-                <ViewIcon size={32} color={palette.moss} />
+                <ViewIcon size={32} style={{ color: palette.moss }} />
                 <div style={{ ...headingStyle, fontSize: 17, marginTop: 10 }}>
                   {isLibrary ? "裝備庫是空的" : `${activity.title}還沒有裝備`}
                 </div>
@@ -1197,7 +1256,7 @@ function GearReckoner() {
                     <section key={cat.key} style={panelStyle}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Icon size={16} color={palette.moss} />
+                          <Icon size={16} style={{ color: palette.moss }} />
                           <span style={headingStyle}>{cat.title}</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1231,23 +1290,8 @@ function GearReckoner() {
                             <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
                               {it.name}
                               {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
-                              {isLibrary && (
-                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                                  {it.activities.length === 0 ? (
-                                    <span className="act-badge" style={{ borderStyle: "dashed" }}>未分活動</span>
-                                  ) : (
-                                    ACTIVITIES.filter((a) => it.activities.includes(a.key)).map((a) => {
-                                      const AIcon = ICONS[a.icon];
-                                      return (
-                                        <span key={a.key} className="act-badge">
-                                          <AIcon size={10} /> {a.title}
-                                        </span>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              )}
                             </div>
+                            {isLibrary && <ActivityDots activities={it.activities} />}
                             {(isWeightMode || isLibrary || hasWeight(it.weight)) && (
                               <div
                                 style={{
@@ -1286,7 +1330,7 @@ function GearReckoner() {
               <section style={panelStyle}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <Plus size={16} color={palette.moss} />
+                    <Plus size={16} style={{ color: palette.moss }} />
                     <span style={headingStyle}>{TEMP_CATEGORY_TITLE}</span>
                     <span style={{ fontSize: 11.5, color: palette.textFaint }}>（借用、租的、只帶這次的）</span>
                   </div>
@@ -1364,7 +1408,7 @@ function GearReckoner() {
             {/* 歷史紀錄 */}
             <section style={panelStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <History size={16} color={palette.moss} />
+                <History size={16} style={{ color: palette.moss }} />
                 <span style={headingStyle}>{isLibrary ? "所有歷史紀錄" : `${activity.title}歷史紀錄`}</span>
               </div>
 
@@ -1424,7 +1468,7 @@ function GearReckoner() {
             {/* 資料備份 */}
             <section style={panelStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <ShieldCheck size={16} color={palette.moss} />
+                <ShieldCheck size={16} style={{ color: palette.moss }} />
                 <span style={headingStyle}>資料備份</span>
               </div>
               <p style={{ fontSize: 12.5, color: palette.textMuted, margin: "0 0 12px", lineHeight: 1.6 }}>
@@ -1512,20 +1556,20 @@ function GearReckoner() {
                   <svg viewBox="0 0 200 180" width="100%" height="150">
                     <defs>
                       <linearGradient id="fillGrad" x1="0" y1="1" x2="0" y2="0">
-                        <stop offset="0%" stopColor={palette.amber} />
-                        <stop offset="100%" stopColor={palette.moss} />
+                        <stop offset="0%" style={{ stopColor: palette.amber }} />
+                        <stop offset="100%" style={{ stopColor: palette.moss }} />
                       </linearGradient>
                       <clipPath id="mountainClip">
                         <path d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z" />
                       </clipPath>
                     </defs>
                     {[40, 75, 110, 145].map((y, i) => (
-                      <line key={i} x1="8" y1={y} x2="192" y2={y} stroke={palette.line} strokeWidth="1" strokeDasharray="2 4" />
+                      <line key={i} x1="8" y1={y} x2="192" y2={y} style={{ stroke: palette.line }} strokeWidth="1" strokeDasharray="2 4" />
                     ))}
                     <path
                       d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z"
                       fill="none"
-                      stroke={palette.textFaint}
+                      style={{ stroke: palette.textFaint }}
                       strokeWidth="1.5"
                     />
                     <g clipPath="url(#mountainClip)">
@@ -1538,13 +1582,13 @@ function GearReckoner() {
                         opacity="0.85"
                       />
                     </g>
-                    <line x1="10" y1="160" x2="190" y2="160" stroke={palette.textFaint} strokeWidth="1.5" />
+                    <line x1="10" y1="160" x2="190" y2="160" style={{ stroke: palette.textFaint }} strokeWidth="1.5" />
                     <line
                       x1="6"
                       y1={160 - (targetPercent / 100) * 130}
                       x2="194"
                       y2={160 - (targetPercent / 100) * 130}
-                      stroke={palette.warn}
+                      style={{ stroke: palette.warn }}
                       strokeWidth="1.5"
                       strokeDasharray="5 3"
                     />
@@ -1552,7 +1596,7 @@ function GearReckoner() {
                       x="196"
                       y={160 - (targetPercent / 100) * 130 + 4}
                       fontSize="9"
-                      fill={palette.warn}
+                      style={{ fill: palette.warn }}
                       textAnchor="end"
                       fontFamily="'JetBrains Mono', monospace"
                     >
@@ -1674,7 +1718,7 @@ function GearReckoner() {
           </>
         ) : (
           <>
-            <ListChecks size={18} color={palette.moss} />
+            <ListChecks size={18} style={{ color: palette.moss }} />
             <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700, color: palette.amber }}>
               {checkedCount}
               <span style={{ fontSize: 13, color: palette.textMuted }}> / {itemCount} 件</span>
@@ -1717,6 +1761,29 @@ function GearReckoner() {
   );
 }
 
+// 「全部裝備」每件裝備右邊的活動小圓點（顏色 = 該活動的代表色）
+function ActivityDots({ activities }) {
+  if (activities.length === 0) {
+    return (
+      <div className="act-dots" title="還沒指定活動">
+        <span className="act-dot none">?</span>
+      </div>
+    );
+  }
+  return (
+    <div className="act-dots" title={ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => a.title).join("、")}>
+      {ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => {
+        const Icon = ICONS[a.icon];
+        return (
+          <span key={a.key} className="act-dot" style={{ color: THEMES[a.key].tag }}>
+            <Icon size={11} />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // 右側的分類小計長條
 function Breakdown({ rows }) {
   return (
@@ -1728,7 +1795,7 @@ function Breakdown({ rows }) {
             <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{row.text}</span>
           </div>
           <div style={{ height: 5, borderRadius: 3, background: palette.panelAlt, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${row.ratio * 100}%`, background: palette.moss, borderRadius: 3 }} />
+            <div style={{ height: "100%", width: `${row.ratio * 100}%`, background: row.color || palette.moss, borderRadius: 3 }} />
           </div>
         </div>
       ))}
@@ -1750,7 +1817,7 @@ function LibrarySummary({ gear, panelStyle }) {
         rows={[
           ...ACTIVITIES.map((a) => {
             const n = gear.filter((g) => g.activities.includes(a.key)).length;
-            return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0 };
+            return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0, color: THEMES[a.key].tag };
           }),
           ...(untagged ? [{ key: "none", label: "未分活動", text: `${untagged} 件`, ratio: untagged / gear.length }] : []),
         ]}
@@ -1834,7 +1901,7 @@ function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <ArrowUpDown size={16} color={palette.amber} />
+          <ArrowUpDown size={16} style={{ color: palette.amber }} />
           <button className={`tab-btn ${tab === "gear" ? "active" : ""}`} onClick={() => setTab("gear")}>
             排裝備
           </button>
@@ -1858,7 +1925,7 @@ function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
               return (
                 <div key={cat.key} className="drag-row">
                   <DragHandle />
-                  <Icon size={16} color={palette.moss} />
+                  <Icon size={16} style={{ color: palette.moss }} />
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.title}</span>
                   <span style={mono}>{cat.items.length} 件</span>
                 </div>
@@ -1872,7 +1939,7 @@ function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
           return (
             <section key={cat.key} style={panel}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <Icon size={16} color={palette.moss} />
+                <Icon size={16} style={{ color: palette.moss }} />
                 <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15 }}>
                   {cat.title}
                 </span>
@@ -1902,7 +1969,7 @@ function CheckBox({ on }) {
     <div className={`checkbox ${on ? "on" : ""}`}>
       {on && (
         <svg width="10" height="10" viewBox="0 0 10 10">
-          <path d="M1 5L4 8L9 2" stroke={palette.bg} strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M1 5L4 8L9 2" style={{ stroke: palette.onAccent }} strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
     </div>
