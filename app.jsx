@@ -76,7 +76,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.7.2";
+const APP_VERSION = "3.7.3";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;

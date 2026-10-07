@@ -1,7 +1,7 @@
 {
-  "name": "登山裝備重量試算",
-  "short_name": "裝備試算",
-  "description": "葉董的登山裝備重量試算 App",
+  "name": "裝備酷",
+  "short_name": "裝備酷",
+  "description": "登山、潛水、滑雪的裝備清單與打包小幫手",
   "lang": "zh-Hant",
   "start_url": "./",
   "scope": "./",
