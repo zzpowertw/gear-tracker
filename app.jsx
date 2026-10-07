@@ -75,7 +75,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.6.0";
+const APP_VERSION = "3.6.1";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -1006,6 +1006,8 @@ function GearReckoner() {
         }
         .action-btn:hover { border-color: ${palette.amber}; }
         .action-btn.primary { background: ${palette.amber}; border-color: ${palette.amber}; color: ${palette.onAccent}; }
+        .action-btn.pack { background: ${palette.moss}; border-color: ${palette.moss}; color: ${palette.onAccent}; }
+        .action-btn.pack:hover { filter: brightness(1.08); }
         .action-btn.danger { color: ${palette.warn}; }
         .action-btn.danger:hover { border-color: ${palette.warn}; }
         .action-btn:disabled { opacity: 0.5; cursor: default; }
@@ -1166,12 +1168,6 @@ function GearReckoner() {
         }
         .pack-row:active { transform: scale(0.99); }
         .pack-row.packed { opacity: 0.55; text-decoration: line-through; }
-        .pack-check {
-          width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
-          display: flex; align-items: center; justify-content: center;
-          border: 2px solid ${palette.textFaint}; color: ${palette.onAccent};
-        }
-        .pack-row.packed .pack-check { background: ${palette.amber}; border-color: ${palette.amber}; }
         .pack-done {
           text-align: center; padding: 18px 12px; margin-bottom: 14px; border-radius: 12px;
           background: ${palette.panel}; border: 1.5px solid ${palette.amber};
@@ -1269,7 +1265,7 @@ function GearReckoner() {
                 <Download size={14} /> 匯出圖片
               </button>
               <button
-                className="action-btn"
+                className="action-btn pack"
                 onClick={() => setPacking(true)}
                 disabled={checkedCount === 0}
                 title={checkedCount === 0 ? "先勾選要帶的裝備" : undefined}
@@ -2054,7 +2050,7 @@ function PackingView({ activity, title, items, packed, isWeightMode, saving, onT
   // 用一般函式產生每一行（不是元件），點擊時不會整排重建
   const row = (it, isPacked) => (
     <div key={it.id} className={`pack-row ${isPacked ? "packed" : ""}`} onClick={() => onToggle(it.id)}>
-      <span className="pack-check">{isPacked && <Check size={14} />}</span>
+      <CheckBox on={isPacked} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {it.name}
         {it.note && <span style={{ color: palette.textFaint, fontSize: 13 }}> · {it.note}</span>}
@@ -2232,6 +2228,8 @@ function SortableList({ onMove, style, children, longPress = false }) {
   useEffect(() => {
     let sortable = null;
     let cancelled = false;
+    // Sortable 在一般快速點擊放開時也會送出 unchoose，所以要記住「真的有長按拿起來」才擋點擊
+    let picked = false;
     import(SORTABLE_URL).then(({ default: Sortable }) => {
       if (cancelled) return;
       sortable = Sortable.create(ref.current, {
@@ -2249,10 +2247,12 @@ function SortableList({ onMove, style, children, longPress = false }) {
         ghostClass: "drag-ghost",
         chosenClass: "drag-chosen",
         onChoose: () => {
+          picked = true;
           if (longPress && navigator.vibrate) navigator.vibrate(10); // Android 輕震提示「可以拖了」
         },
         onUnchoose: () => {
-          lastDragAt = Date.now();
+          if (picked) lastDragAt = Date.now();
+          picked = false;
         },
         onEnd: ({ item, from, oldIndex, newIndex }) => {
           if (oldIndex === newIndex) return;

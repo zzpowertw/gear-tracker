@@ -4,7 +4,7 @@
 // - 外部程式庫（固定版本號，不會變）：先用快取，加快開啟速度
 // 每次發佈新版請把 CACHE_VERSION 改成跟 app.jsx 的 APP_VERSION 一樣
 // ============================================================
-const CACHE_VERSION = "3.6.0";
+const CACHE_VERSION = "3.6.1";
 const CACHE = `gear-reckoner-${CACHE_VERSION}`;
 
 const APP_SHELL = [

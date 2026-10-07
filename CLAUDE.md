@@ -30,3 +30,7 @@ Personal multi-activity gear list PWA (hiking = weight mode; diving / skiing / c
 
 ## Local preview
 `python -m http.server 8765` (also in `.claude/launch.json` as `gear-app`).
+
+## Testing gotchas
+- Simulate taps with the full sequence (pointerdown → mousedown → pointerup → mouseup → click), never bare `el.click()`: rows sit inside SortableJS lists, and Sortable reacts to the pointer events (a bare click hid the v3.4–3.6.0 "taps do nothing" bug).
+- Verify a release on a profile that still has the previous service worker installed (first open after update may serve the old index.html).
