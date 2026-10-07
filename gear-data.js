@@ -1,19 +1,47 @@
 // ============================================================
-// 預設類別與範例裝備
-// 每個人的裝備清單存在自己的帳號裡（App 內新增/修改/刪除）
-// 這裡只放：①預設大類別 ②「載入範例清單」用的範例 ③舊版紀錄的轉換
+// 活動、預設類別與範例裝備
+// 每個人的裝備庫存在自己的帳號裡（App 內新增/修改/刪除）
+// 這裡只放：①活動 ②預設大類別 ③「載入範例清單」用的範例 ④舊版資料的轉換
 // weight 單位：公克 (g)
 // ⚠ 範例裝備的 id 不可改名：v1.x 的舊紀錄靠這些 id 轉換
 // ============================================================
 
+// 活動：mode = "weight"（重量模式：算總重、有目標重量）或 "list"（清單模式：重點是有沒有帶）
+// ⚠ key 不可改名：裝備的 activities、紀錄的 activity 都存這個 key
+export const ACTIVITIES = [
+  { key: "hiking", title: "登山", icon: "Mountain", mode: "weight" },
+  { key: "diving", title: "潛水", icon: "Waves", mode: "list" },
+  { key: "skiing", title: "滑雪", icon: "Snowflake", mode: "list" },
+  { key: "camping", title: "露營", icon: "Tent", mode: "list" },
+];
+// v2.x 以前的裝備和紀錄都屬於登山
+export const DEFAULT_ACTIVITY = "hiking";
+
 // icon 對應 app.jsx 裡的 ICONS
+// activities：新增裝備時，選了這些活動才會出現這個類別；不寫 = 每個活動都適用
 export const PRESET_CATEGORIES = [
   { key: "shoes", title: "鞋款", icon: "Footprints" },
   { key: "clothing", title: "衣物", icon: "Shirt" },
   { key: "pack", title: "背包", icon: "Backpack" },
-  { key: "sleep", title: "睡眠", icon: "Tent" },
-  { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
-  { key: "water", title: "水具", icon: "Droplet" },
+  { key: "sleep", title: "睡眠", icon: "BedDouble", activities: ["hiking", "camping"] },
+  { key: "kitchen", title: "炊煮飲食", icon: "CookingPot", activities: ["hiking", "camping"] },
+  { key: "water", title: "水具", icon: "Droplet", activities: ["hiking", "camping"] },
+  // 潛水
+  { key: "dive-bcd", title: "BCD 浮力背心", icon: "LifeBuoy", activities: ["diving"] },
+  { key: "dive-reg", title: "調節器", icon: "Wind", activities: ["diving"] },
+  { key: "dive-suit", title: "防寒衣", icon: "Layers", activities: ["diving"] },
+  { key: "dive-computer", title: "潛水電腦錶", icon: "Watch", activities: ["diving"] },
+  { key: "dive-mask", title: "面鏡・蛙鞋", icon: "Glasses", activities: ["diving"] },
+  { key: "dive-weight", title: "配重", icon: "Weight", activities: ["diving"] },
+  // 滑雪
+  { key: "ski-board", title: "雪板・固定器", icon: "MountainSnow", activities: ["skiing"] },
+  { key: "ski-boots", title: "雪鞋", icon: "Footprints", activities: ["skiing"] },
+  { key: "ski-protect", title: "安全帽・雪鏡・護具", icon: "HardHat", activities: ["skiing"] },
+  { key: "ski-wear", title: "雪衣・雪褲", icon: "Shirt", activities: ["skiing"] },
+  // 露營
+  { key: "camp-shelter", title: "帳篷・天幕", icon: "Tent", activities: ["camping"] },
+  { key: "camp-furniture", title: "桌椅家具", icon: "Armchair", activities: ["camping"] },
+  // 共用
   { key: "electronics", title: "電子設備", icon: "Smartphone" }, // v2.3 起合併原「電子照明」與「電子設備」
   { key: "accessory", title: "配件", icon: "Glasses" },
   { key: "safety", title: "醫療安全", icon: "Cross" },
@@ -56,6 +84,17 @@ export const SAMPLE_DEFAULT_ON = [
   "hydrapak", "naturehike-mat", "trail-hat", "urban3", "headlamp", "smartwool-socks",
   "darn-tough-socks", "naturehike-pillow", "beams-neckwarmer",
 ];
+
+/** 裝備讀進來時補上缺的欄位（v2.x 的裝備沒有 activities → 屬於登山） */
+export function normalizeGear(g) {
+  return Array.isArray(g.activities) ? g : { ...g, activities: [DEFAULT_ACTIVITY] };
+}
+
+/** 紀錄讀進來時統一成最新格式（v1 → v2 → v3：補上 activity） */
+export function normalizeRecord(r) {
+  const v2 = upgradeLegacyRecord(r);
+  return v2.activity ? v2 : { ...v2, activity: DEFAULT_ACTIVITY };
+}
 
 /**
  * v1.x 的紀錄格式 { checked, footwear, customItems } → v2 格式 { items: [...] }

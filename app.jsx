@@ -35,30 +35,57 @@ import {
   ArrowUpDown,
   Check,
   GripVertical,
+  Mountain,
+  Waves,
+  Snowflake,
+  LifeBuoy,
+  Wind,
+  Watch,
+  Weight,
+  MountainSnow,
+  HardHat,
+  Armchair,
+  BedDouble,
+  Layers,
+  LayoutGrid,
+  Library,
+  ListChecks,
 } from "lucide-react";
 import {
+  ACTIVITIES,
+  DEFAULT_ACTIVITY,
   PRESET_CATEGORIES,
   CATEGORY_ALIASES,
   TEMP_CATEGORY_TITLE,
   DEFAULT_TARGET_G,
   SAMPLE_GEAR,
   SAMPLE_DEFAULT_ON,
-  upgradeLegacyRecord,
+  normalizeGear,
+  normalizeRecord,
 } from "./gear-data.js";
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "3.0.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
-const BACKUP_SCHEMA = 2;
-// 編輯中的內容（勾選、標題、臨時品項）：本機存一份；登入時也存到雲端 meta/draft，跨裝置同步
+// 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
+const BACKUP_SCHEMA = 3;
+// 編輯中的內容（每個活動各自的勾選、標題、臨時品項）：本機存一份；登入時也存到雲端 meta/draft，跨裝置同步
 const DRAFT_KEY = "gear-draft";
 const DRAFT_PUSH_DELAY_MS = 600; // 停手多久後才上傳，避免打字時每個字都上傳
 const BACKUP_REMIND_DAYS = 30;
+const VIEW_KEY = "gear-view"; // 目前看的活動（只存這台裝置）
+const ALL = "all"; // 「全部裝備」：管理裝備庫
 
-const ICONS = { Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Smartphone, Glasses, Cross, Package, Tag };
+const ICONS = {
+  Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Smartphone, Glasses, Cross, Package, Tag,
+  Mountain, Waves, Snowflake, LifeBuoy, Wind, Watch, Weight, MountainSnow, HardHat, Armchair, BedDouble, Layers,
+};
+
+const hasWeight = (w) => typeof w === "number" && w > 0;
 
 function formatWeight(g) {
+  if (!hasWeight(g)) return "—";
   return g >= 1000 ? `${(g / 1000).toFixed(2)} kg` : `${Math.round(g * 10) / 10} g`;
 }
 
@@ -87,11 +114,14 @@ const palette = {
 const fontStack =
   '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif';
 
+const activityOf = (key) => ACTIVITIES.find((a) => a.key === key) || ACTIVITIES[0];
+
 // ------------------------------------------------------------
 // 匯出成 PNG 圖片：純 Canvas 繪製，不依賴外部套件
 // sections: [{ title, lines: [{ name, weight }] }]
+// mode: "weight" 顯示總重；"list" 顯示件數
 // ------------------------------------------------------------
-function drawSnapshotToPng({ owner, title, date, sections, total }) {
+function drawSnapshotToPng({ owner, title, date, sections, total, mode, count }) {
   const width = 760;
   const rowH = 30;
   const lineCount = sections.reduce((n, s) => n + 1 + s.lines.length, 0);
@@ -118,7 +148,7 @@ function drawSnapshotToPng({ owner, title, date, sections, total }) {
 
   ctx.fillStyle = palette.text;
   ctx.font = `700 28px ${fontStack}`;
-  ctx.fillText(title || "登山裝備紀錄", 32, 78);
+  ctx.fillText(title || "裝備紀錄", 32, 78);
 
   ctx.fillStyle = palette.textMuted;
   ctx.font = `400 13px ${fontStack}`;
@@ -140,12 +170,14 @@ function drawSnapshotToPng({ owner, title, date, sections, total }) {
     sec.lines.forEach((line) => {
       ctx.fillStyle = palette.text;
       ctx.font = `400 14px ${fontStack}`;
-      ctx.fillText(line.name, 44, y);
-      ctx.textAlign = "right";
-      ctx.fillStyle = palette.textMuted;
-      ctx.font = `600 14px ${fontStack}`;
-      ctx.fillText(formatWeight(line.weight), width - 32, y);
-      ctx.textAlign = "left";
+      ctx.fillText(mode === "list" ? `☐  ${line.name}` : line.name, 44, y);
+      if (hasWeight(line.weight)) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = palette.textMuted;
+        ctx.font = `600 14px ${fontStack}`;
+        ctx.fillText(formatWeight(line.weight), width - 32, y);
+        ctx.textAlign = "left";
+      }
       y += rowH;
     });
     y += 10;
@@ -160,14 +192,15 @@ function drawSnapshotToPng({ owner, title, date, sections, total }) {
 
   ctx.fillStyle = palette.textMuted;
   ctx.font = `500 13px ${fontStack}`;
-  ctx.fillText("總重量", 32, y);
+  ctx.fillText(mode === "list" ? "裝備件數" : "總重量", 32, y);
   y += 40;
   ctx.fillStyle = palette.amber;
   ctx.font = `700 40px ${fontStack}`;
-  ctx.fillText(`${(total / 1000).toFixed(2)} kg`, 32, y);
+  ctx.fillText(mode === "list" ? `${count} 件` : `${(total / 1000).toFixed(2)} kg`, 32, y);
   ctx.fillStyle = palette.textMuted;
   ctx.font = `500 14px ${fontStack}`;
-  ctx.fillText(`${total.toLocaleString()} g`, 32, y + 22);
+  if (mode !== "list") ctx.fillText(`${total.toLocaleString()} g`, 32, y + 22);
+  else if (total > 0) ctx.fillText(`參考重量 ${(total / 1000).toFixed(2)} kg`, 32, y + 22);
 
   ctx.fillStyle = palette.textFaint;
   ctx.font = `400 11px ${fontStack}`;
@@ -217,11 +250,33 @@ function exportImage(snapshot) {
   canvas.toBlob((blob) => blob && saveFile(blob, `${safeFilename(snapshot.title)}.png`, snapshot.title), "image/png");
 }
 
+// 草稿：v3 起每個活動各一份 { byActivity: { hiking: { checked, title, tempItems }, ... } }
+// v2.x 只有一份（登山），讀進來時自動放到 hiking
+function upgradeDraft(d) {
+  if (!d) return {};
+  if (d.byActivity) return d.byActivity;
+  if (d.checked || d.title || d.tempItems || d.customItems) {
+    return {
+      [DEFAULT_ACTIVITY]: { checked: d.checked || {}, title: d.title || "", tempItems: d.tempItems || d.customItems || [] },
+    };
+  }
+  return {};
+}
+
 function loadDraft() {
   try {
     return JSON.parse(localStorage.getItem(DRAFT_KEY)) || {};
   } catch (e) {
     return {};
+  }
+}
+
+function loadView() {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === ALL || ACTIVITIES.some((a) => a.key === v) ? v : DEFAULT_ACTIVITY;
+  } catch (e) {
+    return DEFAULT_ACTIVITY;
   }
 }
 
@@ -246,14 +301,16 @@ function normalizeBackup(data) {
   if (!data || data.app !== "gear-reckoner") throw new Error("這不是裝備試算 App 的備份檔");
   if (data.schema > BACKUP_SCHEMA) throw new Error("這個備份檔來自更新的 App 版本，請先重新整理 App 更新到最新版");
   return {
-    gear: Array.isArray(data.gear) ? data.gear : [],
-    records: (Array.isArray(data.records) ? data.records : []).map(upgradeLegacyRecord),
+    gear: (Array.isArray(data.gear) ? data.gear : []).map(normalizeGear),
+    records: (Array.isArray(data.records) ? data.records : []).map(normalizeRecord),
     settings: data.settings || {},
   };
 }
 
+const EMPTY_DRAFT = { checked: {}, title: "", tempItems: [] };
+
 function GearReckoner() {
-  const [draft] = useState(loadDraft);
+  const [initialDraft] = useState(loadDraft);
 
   // 登入狀態：undefined = 確認中、null = 未登入/本機模式、物件 = 已登入
   const [user, setUser] = useState(undefined);
@@ -263,27 +320,54 @@ function GearReckoner() {
   const [syncing, setSyncing] = useState(false);
 
   // 雲端（或本機）資料
-  const [gear, setGear] = useState([]);
-  const [records, setRecords] = useState([]);
+  const [rawGear, setGear] = useState([]);
+  const [rawRecords, setRecords] = useState([]);
   const [metaDocs, setMetaDocs] = useState([]);
   const [loaded, setLoaded] = useState({});
 
-  // 目前畫面上的狀態（存在這台裝置的草稿）
-  const [checked, setChecked] = useState(draft.checked || {});
-  const [title, setTitle] = useState(draft.title || "");
-  const [tempItems, setTempItems] = useState(draft.tempItems || draft.customItems || []);
+  // 目前看的活動（或「全部裝備」）
+  const [view, setView] = useState(loadView);
+  const isLibrary = view === ALL;
+  const activity = isLibrary ? null : activityOf(view);
+  const isWeightMode = activity?.mode === "weight";
+
+  // 每個活動各自的編輯內容（存在這台裝置，登入時也跨裝置同步）
+  const [drafts, setDrafts] = useState(() => upgradeDraft(initialDraft));
+  const cur = (!isLibrary && drafts[view]) || EMPTY_DRAFT;
+  const checked = cur.checked || {};
+  const title = cur.title || "";
+  const tempItems = cur.tempItems || [];
+  const updateDraft = (field, updater, act = view) =>
+    setDrafts((prev) => {
+      const d = { ...EMPTY_DRAFT, ...prev[act] };
+      return { ...prev, [act]: { ...d, [field]: typeof updater === "function" ? updater(d[field]) : updater } };
+    });
+  const setChecked = (u, act) => updateDraft("checked", u, act);
+  const setTitle = (u) => updateDraft("title", u);
+  const setTempItems = (u) => updateDraft("tempItems", u);
+
   const [newTempName, setNewTempName] = useState("");
   const [newTempWeight, setNewTempWeight] = useState("");
 
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
+  const [picker, setPicker] = useState(false); // 「從裝備庫加入」面板
   const [reorderMode, setReorderMode] = useState(false); // 整理模式：拖曳調整順序
   const [saving, setSaving] = useState(false);
   const importInput = useRef(null);
   const upgradedIds = useRef(new Set());
-  const draftStamp = useRef(draft.updatedAt || 0); // 目前畫面上編輯內容的時間戳記
+  const draftStamp = useRef(initialDraft.updatedAt || 0); // 目前編輯內容的時間戳記
   const skipDraftPush = useRef(true); // 第一次顯示、或剛套用其他裝置的內容時，不要再傳回去
   const draftTimer = useRef(null);
   const pushDraftRef = useRef(() => {});
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch (e) {
+      // 不影響使用
+    }
+    setReorderMode(false);
+  }, [view]);
 
   useEffect(() => store.watchAuth(setUser), []);
 
@@ -303,21 +387,21 @@ function GearReckoner() {
     return () => unsubs.forEach((u) => u());
   }, [user]);
 
-  // v1.x 舊格式紀錄 → 自動轉成新格式並存回去
+  // v1.x 舊格式紀錄 → 自動轉成新格式並存回去（v2 → v3 只是補 activity，讀取時處理即可）
   useEffect(() => {
-    const legacy = records.filter((r) => !Array.isArray(r.items) && !upgradedIds.current.has(r.id));
+    const legacy = rawRecords.filter((r) => !Array.isArray(r.items) && !upgradedIds.current.has(r.id));
     if (legacy.length === 0) return;
     legacy.forEach((r) => upgradedIds.current.add(r.id));
-    store.putMany(user, "records", legacy.map(upgradeLegacyRecord));
-  }, [records, user]);
+    store.putMany(user, "records", legacy.map(normalizeRecord));
+  }, [rawRecords, user]);
 
   // 已合併的類別（例如舊的「電子設備」devices）→ 自動把裝備搬到新類別
   useEffect(() => {
     if (!loaded.gear) return;
-    const stale = gear.filter((g) => CATEGORY_ALIASES[g.category]);
+    const stale = rawGear.filter((g) => CATEGORY_ALIASES[g.category]);
     if (stale.length === 0) return;
     store.putMany(user, "gear", stale.map((g) => ({ ...g, category: CATEGORY_ALIASES[g.category] })));
-  }, [gear, loaded.gear, user]);
+  }, [rawGear, loaded.gear, user]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -336,9 +420,9 @@ function GearReckoner() {
     if ((remote.updatedAt || 0) <= draftStamp.current) return;
     draftStamp.current = remote.updatedAt;
     skipDraftPush.current = true;
-    setChecked(remote.checked || {});
-    setTitle(remote.title || "");
-    setTempItems(remote.tempItems || []);
+    if (remote.byActivity) setDrafts(remote.byActivity);
+    // 還沒更新的舊版 App 只會傳登山那一份 → 只蓋登山，其他活動保留
+    else setDrafts((prev) => ({ ...prev, ...upgradeDraft(remote) }));
   }, [metaDocs]);
 
   // 編輯內容有變 → 存本機，登入時稍等一下再上傳雲端
@@ -346,22 +430,24 @@ function GearReckoner() {
     const isRemoteOrInitial = skipDraftPush.current;
     skipDraftPush.current = false;
     if (!isRemoteOrInitial) draftStamp.current = Date.now();
-    const snapshot = { checked, title, tempItems, updatedAt: draftStamp.current };
+    const snapshot = { byActivity: drafts, updatedAt: draftStamp.current };
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot));
     } catch (e) {
       // 本機儲存空間不可用（例如無痕模式），不影響使用
     }
     if (isRemoteOrInitial || !user) return;
+    // 同時寫一份舊格式（登山）給還沒更新的舊版 App 看
+    const hiking = { ...EMPTY_DRAFT, ...drafts[DEFAULT_ACTIVITY] };
     const push = () => {
       clearTimeout(draftTimer.current);
       pushDraftRef.current = () => {};
-      store.put(user, "meta", { ...snapshot, id: "draft", deviceId: DEVICE_ID });
+      store.put(user, "meta", { ...snapshot, ...hiking, id: "draft", deviceId: DEVICE_ID });
     };
     clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(push, DRAFT_PUSH_DELAY_MS);
     pushDraftRef.current = push;
-  }, [checked, title, tempItems]);
+  }, [drafts]);
 
   // 立即同步：先把還沒上傳的編輯內容送出，再跟雲端重新連線
   const syncNow = async ({ quiet = false } = {}) => {
@@ -414,6 +500,15 @@ function GearReckoner() {
     : "synced";
   const saveMeta = (changes) => store.put(user, "meta", { ...meta, ...changes, id: "settings" });
 
+  const gear = useMemo(() => rawGear.map(normalizeGear), [rawGear]);
+  const records = useMemo(() => rawRecords.filter((r) => Array.isArray(r.items)).map(normalizeRecord), [rawRecords]);
+
+  // 這個畫面要顯示的裝備：全部裝備 = 整個裝備庫；活動 = 貼了這個活動標籤的
+  const viewGear = useMemo(
+    () => (isLibrary ? gear : gear.filter((g) => g.activities.includes(view))),
+    [gear, view, isLibrary]
+  );
+
   // 類別依使用者排好的順序（meta.categoryOrder）；沒排到的（例如新類別）接在後面
   const categories = useMemo(() => {
     const all = [
@@ -431,7 +526,7 @@ function GearReckoner() {
   const gearByCat = useMemo(() => {
     // 手動排過的用 order，還沒排過的（例如新增的）依建立時間排在後面
     const sortKey = (g) => (g.order != null ? g.order : g.createdAt || 0);
-    const sorted = [...gear].sort((a, b) => sortKey(a) - sortKey(b));
+    const sorted = [...viewGear].sort((a, b) => sortKey(a) - sortKey(b));
     const known = new Set(categories.map((c) => c.key));
     return categories
       .map((cat) => ({
@@ -440,20 +535,29 @@ function GearReckoner() {
         items: sorted.filter((g) => g.category === cat.key || (cat.key === "other" && !known.has(g.category))),
       }))
       .filter((cat) => cat.items.length > 0);
-  }, [gear, categories]);
+  }, [viewGear, categories]);
 
   const sortedRecords = useMemo(
-    () => [...records].filter((r) => Array.isArray(r.items)).sort((a, b) => (a.date < b.date ? 1 : -1)),
-    [records]
+    () =>
+      records
+        .filter((r) => isLibrary || r.activity === view)
+        .sort((a, b) => (a.date < b.date ? 1 : -1)),
+    [records, view, isLibrary]
   );
 
+  const weightOf = (w) => (hasWeight(w) ? w : 0);
   const catTotals = gearByCat.map((cat) => ({
     key: cat.key,
     label: cat.title,
-    value: cat.items.reduce((sum, g) => sum + (checked[g.id] ? g.weight : 0), 0),
+    value: cat.items.reduce((sum, g) => sum + (checked[g.id] ? weightOf(g.weight) : 0), 0),
+    count: cat.items.filter((g) => checked[g.id]).length,
+    total: cat.items.length,
   }));
-  const tempTotal = tempItems.reduce((sum, it) => sum + (it.checked ? it.weight : 0), 0);
+  const tempChecked = tempItems.filter((t) => t.checked);
+  const tempTotal = tempChecked.reduce((sum, it) => sum + weightOf(it.weight), 0);
   const grandTotal = Math.round((catTotals.reduce((s, c) => s + c.value, 0) + tempTotal) * 10) / 10;
+  const checkedCount = catTotals.reduce((s, c) => s + c.count, 0) + tempChecked.length;
+  const itemCount = viewGear.length + tempItems.length;
 
   const targetG = meta.targetG || DEFAULT_TARGET_G;
   const maxScaleG = Math.ceil(Math.max(targetG * 1.3, grandTotal) / 1000) * 1000;
@@ -469,6 +573,9 @@ function GearReckoner() {
     ? Math.floor((Date.now() - new Date(meta.lastBackupAt)) / 86400000)
     : null;
   const backupDue = (gear.length > 0 || records.length > 0) && (daysSinceBackup === null || daysSinceBackup >= BACKUP_REMIND_DAYS);
+
+  // 還沒貼上這個活動標籤的裝備（給「從裝備庫加入」用）
+  const notInView = isLibrary ? [] : gear.filter((g) => !g.activities.includes(view));
 
   // ---------- 動作 ----------
   const toggle = (id) => setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -487,26 +594,45 @@ function GearReckoner() {
     }
   };
 
+  const openNewGear = (extra = {}) =>
+    setEditor({ item: { activities: isLibrary ? [] : [view], ...extra } });
+
   const handleSaveGear = (item) => {
     if (item.id) {
       store.put(user, "gear", item);
     } else {
       const created = { ...item, id: newId("g"), createdAt: Date.now() };
       store.put(user, "gear", created);
-      setChecked((prev) => ({ ...prev, [created.id]: true }));
+      if (!isLibrary && created.activities.includes(view)) setChecked((prev) => ({ ...prev, [created.id]: true }));
     }
     setEditor(null);
   };
 
   const handleDeleteGear = (item) => {
-    if (!confirm(`確定要從裝備清單刪除「${item.name}」嗎？\n（已存的歷史紀錄不受影響）`)) return;
+    if (!confirm(`確定要從裝備庫刪除「${item.name}」嗎？\n所有活動都會移除這件裝備（已存的歷史紀錄不受影響）。`)) return;
     store.remove(user, "gear", item.id);
-    setChecked((prev) => {
-      const next = { ...prev };
-      delete next[item.id];
+    setDrafts((prev) => {
+      const next = {};
+      Object.entries(prev).forEach(([k, d]) => {
+        const c = { ...(d.checked || {}) };
+        delete c[item.id];
+        next[k] = { ...d, checked: c };
+      });
       return next;
     });
     setEditor(null);
+  };
+
+  // 從裝備庫挑選 → 貼上目前活動的標籤
+  const handleAddFromLibrary = (ids) => {
+    const picked = gear.filter((g) => ids.includes(g.id));
+    store.putMany(user, "gear", picked.map((g) => ({ ...g, activities: [...g.activities, view] })));
+    setChecked((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => (next[id] = true));
+      return next;
+    });
+    setPicker(false);
   };
 
   const handleAddCategory = () => {
@@ -530,7 +656,7 @@ function GearReckoner() {
     return true;
   };
 
-  // 拖曳大類別：畫面上第 from 個類別移到第 to 個位置（沒有裝備的類別維持原位）
+  // 拖曳大類別：畫面上第 from 個類別移到第 to 個位置（畫面上沒出現的類別維持原位）
   const reorderCategories = (from, to) => {
     const visible = gearByCat.map((c) => c.key);
     const [moved] = visible.splice(from, 1);
@@ -549,19 +675,24 @@ function GearReckoner() {
   };
 
   const handleLoadSample = () => {
-    if (!confirm("要載入範例裝備清單嗎？載入後可以自由修改或刪除。")) return;
+    if (!confirm("要載入範例裝備清單（登山）嗎？載入後可以自由修改或刪除。")) return;
     const existing = new Set(gear.map((g) => g.id));
     const base = Date.now();
     store.putMany(
       user,
       "gear",
-      SAMPLE_GEAR.filter((g) => !existing.has(g.id)).map((g, i) => ({ ...g, createdAt: base + i }))
+      SAMPLE_GEAR.filter((g) => !existing.has(g.id)).map((g, i) => ({
+        ...g,
+        activities: [DEFAULT_ACTIVITY],
+        createdAt: base + i,
+      }))
     );
     setChecked((prev) => {
       const next = { ...prev, speedgoat7: true };
       SAMPLE_DEFAULT_ON.forEach((id) => (next[id] = true));
       return next;
-    });
+    }, DEFAULT_ACTIVITY);
+    setView(DEFAULT_ACTIVITY);
   };
 
   const handleEditTarget = () => {
@@ -574,9 +705,13 @@ function GearReckoner() {
 
   const addTempItem = () => {
     const name = newTempName.trim();
-    const weight = parseFloat(newTempWeight);
-    if (!name || isNaN(weight) || weight <= 0) return;
-    setTempItems((prev) => [...prev, { id: newId("t"), name, weight: Math.round(weight * 10) / 10, checked: true }]);
+    const w = parseFloat(newTempWeight);
+    if (!name) return;
+    if (newTempWeight.trim() && (isNaN(w) || w < 0)) return;
+    setTempItems((prev) => [
+      ...prev,
+      { id: newId("t"), name, weight: hasWeight(w) ? Math.round(w * 10) / 10 : null, checked: true },
+    ]);
     setNewTempName("");
     setNewTempWeight("");
   };
@@ -586,21 +721,23 @@ function GearReckoner() {
     ...gearByCat.flatMap((cat) =>
       cat.items
         .filter((g) => checked[g.id])
-        .map((g) => ({ id: g.id, cat: cat.title, name: g.name, note: g.note || "", weight: g.weight }))
+        .map((g) => ({ id: g.id, cat: cat.title, name: g.name, note: g.note || "", weight: hasWeight(g.weight) ? g.weight : null }))
     ),
-    ...tempItems
-      .filter((t) => t.checked)
-      .map((t) => ({ id: t.id, cat: TEMP_CATEGORY_TITLE, name: t.name, note: "", weight: t.weight })),
+    ...tempChecked.map((t) => ({ id: t.id, cat: TEMP_CATEGORY_TITLE, name: t.name, note: "", weight: hasWeight(t.weight) ? t.weight : null })),
   ];
 
+  const defaultTitle = () => `${activity.title}裝備紀錄`;
+
   const handleExportImage = () => {
-    const t = title.trim() || "登山裝備紀錄";
+    const items = currentItems();
     exportImage({
       owner,
-      title: t,
+      title: title.trim() || defaultTitle(),
       date: formatDate(new Date().toISOString()),
-      sections: itemsToSections(currentItems()),
+      sections: itemsToSections(items),
       total: grandTotal,
+      mode: activity.mode,
+      count: items.length,
     });
   };
 
@@ -609,7 +746,8 @@ function GearReckoner() {
     try {
       await store.put(user, "records", {
         id: newId("rec"),
-        title: title.trim() || "登山裝備紀錄",
+        activity: view,
+        title: title.trim() || defaultTitle(),
         date: new Date().toISOString(),
         items: currentItems(),
         total: grandTotal,
@@ -622,16 +760,22 @@ function GearReckoner() {
   };
 
   const handleLoadRecord = (record) => {
-    const gearIds = new Set(gear.map((g) => g.id));
+    const act = record.activity;
+    const actGear = gear.filter((g) => g.activities.includes(act));
+    const actIds = new Set(actGear.map((g) => g.id));
     const inRecord = new Set(record.items.map((i) => i.id));
-    setTitle(record.title);
-    setChecked(Object.fromEntries(gear.map((g) => [g.id, inRecord.has(g.id)])));
-    // 紀錄裡有、但目前清單已經沒有的裝備 → 放到臨時品項
-    setTempItems(
-      record.items
-        .filter((i) => !gearIds.has(i.id))
-        .map((i) => ({ id: i.id, name: i.note ? `${i.name} · ${i.note}` : i.name, weight: i.weight, checked: true }))
-    );
+    setDrafts((prev) => ({
+      ...prev,
+      [act]: {
+        title: record.title,
+        checked: Object.fromEntries(actGear.map((g) => [g.id, inRecord.has(g.id)])),
+        // 紀錄裡有、但目前這個活動已經沒有的裝備 → 放到臨時品項
+        tempItems: record.items
+          .filter((i) => !actIds.has(i.id))
+          .map((i) => ({ id: i.id, name: i.note ? `${i.name} · ${i.note}` : i.name, weight: i.weight, checked: true })),
+      },
+    }));
+    setView(act);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -642,6 +786,8 @@ function GearReckoner() {
       date: formatDate(record.date),
       sections: itemsToSections(record.items),
       total: record.total,
+      mode: activityOf(record.activity).mode,
+      count: record.items.length,
     });
 
   const handleDeleteRecord = (record) => {
@@ -707,6 +853,14 @@ function GearReckoner() {
   };
   const headingStyle = { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15 };
   const monoStyle = { fontFamily: "'JetBrains Mono', monospace" };
+  const ViewIcon = isLibrary ? LayoutGrid : ICONS[activity.icon];
+
+  const pageTitle = isLibrary ? "全部裝備" : `${activity.title}${isWeightMode ? "裝備重量試算" : "裝備清單"}`;
+  const pageHint = isLibrary
+    ? "你擁有的所有裝備都在這裡。每件裝備可以貼上多個活動標籤，例如頭燈同時用在登山和露營。"
+    : isWeightMode
+    ? "勾選這次要帶的裝備，即時算出總重。點 ✎ 可修改或刪除裝備。"
+    : "勾選這次要帶的裝備，出門前確認沒有漏帶。點 ✎ 可修改或刪除裝備。";
 
   return (
     <div
@@ -730,6 +884,7 @@ function GearReckoner() {
         }
         .item-row:hover { background: ${palette.panelAlt}; }
         .item-row.on { border-color: ${palette.line}; }
+        .item-row.static { cursor: default; }
         .checkbox {
           width: 16px; height: 16px; border-radius: 4px;
           border: 1.5px solid ${palette.textFaint};
@@ -836,6 +991,28 @@ function GearReckoner() {
         }
         .cat-chip.selected { border-color: ${palette.amber}; color: ${palette.amber}; }
         .cat-chip.add { border-style: dashed; }
+        .act-bar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin: 0 -16px 18px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+        .act-bar::-webkit-scrollbar { display: none; }
+        .act-tab {
+          display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+          padding: 8px 14px; border-radius: 20px; cursor: pointer;
+          border: 1.5px solid ${palette.line}; background: ${palette.panel};
+          color: ${palette.textMuted}; font-size: 13.5px; font-weight: 600;
+        }
+        .act-tab.active { border-color: ${palette.amber}; color: ${palette.bg}; background: ${palette.amber}; }
+        .act-tab .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.75; }
+        .act-chip {
+          display: inline-flex; align-items: center; gap: 5px;
+          padding: 7px 12px; border-radius: 20px; cursor: pointer;
+          border: 1.5px solid ${palette.line}; background: ${palette.panelAlt};
+          color: ${palette.textMuted}; font-size: 13px; font-weight: 600;
+        }
+        .act-chip.selected { border-color: ${palette.amber}; color: ${palette.amber}; }
+        .act-badge {
+          display: inline-flex; align-items: center; gap: 3px;
+          padding: 1px 7px; border-radius: 20px; font-size: 10.5px; font-weight: 600;
+          border: 1px solid ${palette.line}; color: ${palette.textMuted}; white-space: nowrap;
+        }
         .drag-row {
           display: flex; align-items: center; gap: 10px;
           padding: 10px; border-radius: 8px;
@@ -858,7 +1035,7 @@ function GearReckoner() {
 
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {/* Header */}
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 14 }}>
           <div
             style={{
               display: "flex",
@@ -866,7 +1043,7 @@ function GearReckoner() {
               alignItems: "center",
               gap: 10,
               flexWrap: "wrap",
-              marginBottom: 6,
+              marginBottom: 14,
             }}
           >
             <div style={{ ...monoStyle, fontSize: 12, letterSpacing: "0.12em", color: palette.moss }}>
@@ -881,38 +1058,61 @@ function GearReckoner() {
               onSignOut={handleSignOut}
             />
           </div>
+
+          {/* 活動切換 */}
+          <div className="act-bar">
+            <div className={`act-tab ${isLibrary ? "active" : ""}`} onClick={() => setView(ALL)}>
+              <LayoutGrid size={15} /> 全部裝備 <span className="count">{gear.length}</span>
+            </div>
+            {ACTIVITIES.map((a) => {
+              const Icon = ICONS[a.icon];
+              const n = gear.filter((g) => g.activities.includes(a.key)).length;
+              return (
+                <div key={a.key} className={`act-tab ${view === a.key ? "active" : ""}`} onClick={() => setView(a.key)}>
+                  <Icon size={15} /> {a.title} <span className="count">{n}</span>
+                </div>
+              );
+            })}
+          </div>
+
           <h1
             style={{
               fontFamily: "'Space Grotesk', sans-serif",
-              fontSize: 30,
+              fontSize: 28,
               fontWeight: 700,
               margin: 0,
               letterSpacing: "-0.01em",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
             }}
           >
-            登山裝備重量試算
+            <ViewIcon size={26} color={palette.amber} />
+            {pageTitle}
           </h1>
-          <p style={{ color: palette.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 }}>
-            勾選這次要帶的裝備，即時算出總重。點 ✎ 可修改或刪除裝備。
-          </p>
+          <p style={{ color: palette.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 }}>{pageHint}</p>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ flex: "1 1 260px", minWidth: 200 }}>
-              <input
-                className="title-input"
-                placeholder="幫這次紀錄取個標題，例如：台北大縱走 Day1"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
+          {!isLibrary && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ flex: "1 1 260px", minWidth: 200 }}>
+                <input
+                  className="title-input"
+                  placeholder={
+                    isWeightMode ? "幫這次紀錄取個標題，例如：台北大縱走 Day1" : `幫這次紀錄取個標題，例如：${activity.title}之旅`
+                  }
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+              <button className="action-btn" onClick={handleExportImage}>
+                <Download size={14} /> 匯出圖片
+              </button>
+              <button className="action-btn primary" onClick={handleSaveRecord} disabled={saving}>
+                {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
+                儲存這筆紀錄
+              </button>
             </div>
-            <button className="action-btn" onClick={handleExportImage}>
-              <Download size={14} /> 匯出圖片
-            </button>
-            <button className="action-btn primary" onClick={handleSaveRecord} disabled={saving}>
-              {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
-              儲存這筆紀錄
-            </button>
-          </div>
+          )}
         </div>
 
         <div className="layout-grid">
@@ -922,196 +1122,250 @@ function GearReckoner() {
               <div style={{ ...panelStyle, display: "flex", alignItems: "center", gap: 8, color: palette.textMuted, fontSize: 13 }}>
                 <Loader2 size={14} className="spin" /> 讀取裝備清單中…
               </div>
-            ) : gear.length === 0 ? (
+            ) : viewGear.length === 0 ? (
               <section style={{ ...panelStyle, textAlign: "center", padding: "32px 20px" }}>
-                <Backpack size={32} color={palette.moss} />
-                <div style={{ ...headingStyle, fontSize: 17, marginTop: 10 }}>裝備清單是空的</div>
+                <ViewIcon size={32} color={palette.moss} />
+                <div style={{ ...headingStyle, fontSize: 17, marginTop: 10 }}>
+                  {isLibrary ? "裝備庫是空的" : `${activity.title}還沒有裝備`}
+                </div>
                 <p style={{ color: palette.textMuted, fontSize: 13, margin: "8px 0 18px", lineHeight: 1.6 }}>
-                  先選大類別（鞋款、衣物、背包…），再填名稱、附註、重量。
-                  <br />
-                  也可以先載入範例清單，再改成自己的裝備。
+                  {notInView.length > 0 ? (
+                    <>
+                      可以從裝備庫挑已經有的裝備（例如頭燈、外套），
+                      <br />
+                      或新增{activity.title}專用的裝備。
+                    </>
+                  ) : (
+                    <>
+                      先選大類別，再填名稱、附註、重量。
+                      {(isLibrary || view === DEFAULT_ACTIVITY) && gear.length === 0 && (
+                        <>
+                          <br />
+                          也可以先載入範例清單，再改成自己的裝備。
+                        </>
+                      )}
+                    </>
+                  )}
                 </p>
                 <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                  <button className="action-btn primary" onClick={() => setEditor({ item: {} })}>
-                    <Plus size={14} /> 新增第一件裝備
+                  {notInView.length > 0 && (
+                    <button className="action-btn primary" onClick={() => setPicker(true)}>
+                      <Library size={14} /> 從裝備庫加入
+                    </button>
+                  )}
+                  <button className={`action-btn ${notInView.length > 0 ? "" : "primary"}`} onClick={() => openNewGear()}>
+                    <Plus size={14} /> 新增裝備
                   </button>
-                  <button className="action-btn" onClick={handleLoadSample}>
-                    <FolderOpen size={14} /> 載入範例清單
-                  </button>
+                  {(isLibrary || view === DEFAULT_ACTIVITY) && gear.length === 0 && (
+                    <button className="action-btn" onClick={handleLoadSample}>
+                      <FolderOpen size={14} /> 載入範例清單
+                    </button>
+                  )}
                 </div>
               </section>
+            ) : reorderMode ? (
+              <ReorderView
+                gearByCat={gearByCat}
+                onCategoryReorder={reorderCategories}
+                onGearReorder={reorderGear}
+                onDone={() => setReorderMode(false)}
+              />
             ) : (
               <>
-                {reorderMode ? (
-                  <ReorderView
-                    gearByCat={gearByCat}
-                    onCategoryReorder={reorderCategories}
-                    onGearReorder={reorderGear}
-                    onDone={() => setReorderMode(false)}
-                  />
-                ) : (
-                  <>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        className="action-btn"
-                        style={{ borderStyle: "dashed", padding: 12, flex: 1 }}
-                        onClick={() => setEditor({ item: {} })}
-                      >
-                        <Plus size={15} /> 新增裝備
-                      </button>
-                      <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
-                        <ArrowUpDown size={15} /> 排序
-                      </button>
-                    </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="action-btn"
+                    style={{ borderStyle: "dashed", padding: 12, flex: "1 1 120px" }}
+                    onClick={() => openNewGear()}
+                  >
+                    <Plus size={15} /> 新增裝備
+                  </button>
+                  {notInView.length > 0 && (
+                    <button className="action-btn" style={{ padding: 12 }} onClick={() => setPicker(true)}>
+                      <Library size={15} /> 從裝備庫加入
+                    </button>
+                  )}
+                  <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
+                    <ArrowUpDown size={15} /> 排序
+                  </button>
+                </div>
 
-                    {gearByCat.map((cat) => {
-                      const Icon = ICONS[cat.icon] || Tag;
-                      const subtotal = catTotals.find((c) => c.key === cat.key)?.value || 0;
-                      return (
-                        <section key={cat.key} style={panelStyle}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <Icon size={16} color={palette.moss} />
-                              <span style={headingStyle}>{cat.title}</span>
+                {gearByCat.map((cat) => {
+                  const Icon = ICONS[cat.icon] || Tag;
+                  const t = catTotals.find((c) => c.key === cat.key);
+                  return (
+                    <section key={cat.key} style={panelStyle}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Icon size={16} color={palette.moss} />
+                          <span style={headingStyle}>{cat.title}</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
+                            {isLibrary
+                              ? `${cat.items.length} 件`
+                              : isWeightMode
+                              ? formatWeight(t.value) === "—"
+                                ? "0 g"
+                                : formatWeight(t.value)
+                              : `${t.count} / ${t.total}`}
+                          </span>
+                          <button
+                            className="icon-btn"
+                            title={`在「${cat.title}」新增裝備`}
+                            onClick={() => openNewGear({ category: cat.key })}
+                          >
+                            <Plus size={15} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {cat.items.map((it) => (
+                          <div
+                            key={it.id}
+                            className={`item-row ${isLibrary ? "static" : checked[it.id] ? "on" : ""}`}
+                            onClick={() => (isLibrary ? setEditor({ item: it }) : toggle(it.id))}
+                          >
+                            {!isLibrary && <CheckBox on={checked[it.id]} />}
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
+                              {it.name}
+                              {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
+                              {isLibrary && (
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                                  {it.activities.length === 0 ? (
+                                    <span className="act-badge" style={{ borderStyle: "dashed" }}>未分活動</span>
+                                  ) : (
+                                    ACTIVITIES.filter((a) => it.activities.includes(a.key)).map((a) => {
+                                      const AIcon = ICONS[a.icon];
+                                      return (
+                                        <span key={a.key} className="act-badge">
+                                          <AIcon size={10} /> {a.title}
+                                        </span>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
-                                {formatWeight(subtotal)}
-                              </span>
-                              <button
-                                className="icon-btn"
-                                title={`在「${cat.title}」新增裝備`}
-                                onClick={() => setEditor({ item: { category: cat.key } })}
-                              >
-                                <Plus size={15} />
-                              </button>
-                            </div>
-                          </div>
-  
-                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                            {cat.items.map((it) => (
+                            {(isWeightMode || isLibrary || hasWeight(it.weight)) && (
                               <div
-                                key={it.id}
-                                className={`item-row ${checked[it.id] ? "on" : ""}`}
-                                onClick={() => toggle(it.id)}
+                                style={{
+                                  ...monoStyle,
+                                  fontSize: isWeightMode ? 13.5 : 12,
+                                  fontWeight: 600,
+                                  minWidth: 50,
+                                  textAlign: "right",
+                                  color: isWeightMode && checked[it.id] ? palette.text : palette.textFaint,
+                                }}
                               >
-                                <CheckBox on={checked[it.id]} />
-                                <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
-                                  {it.name}
-                                  {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
-                                </div>
-                                <div
-                                  style={{
-                                    ...monoStyle,
-                                    fontSize: 13.5,
-                                    fontWeight: 600,
-                                    minWidth: 56,
-                                    textAlign: "right",
-                                    color: checked[it.id] ? palette.text : palette.textFaint,
-                                  }}
-                                >
-                                  {formatWeight(it.weight)}
-                                </div>
-                                <button
-                                  className="icon-btn"
-                                  title="修改或刪除"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditor({ item: it });
-                                  }}
-                                >
-                                  <Pencil size={13} />
-                                </button>
+                                {formatWeight(it.weight)}
                               </div>
-                            ))}
+                            )}
+                            <button
+                              className="icon-btn"
+                              title="修改或刪除"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditor({ item: it });
+                              }}
+                            >
+                              <Pencil size={13} />
+                            </button>
                           </div>
-                        </section>
-                      );
-                    })}
-                  </>
-                )}
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
               </>
             )}
 
             {/* 臨時品項 */}
-            <section style={panelStyle}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Plus size={16} color={palette.moss} />
-                  <span style={headingStyle}>{TEMP_CATEGORY_TITLE}</span>
-                  <span style={{ fontSize: 11.5, color: palette.textFaint }}>（借用、只帶這次、不想加進清單的）</span>
-                </div>
-                {tempItems.length > 0 && (
-                  <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>{formatWeight(tempTotal)}</span>
-                )}
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: tempItems.length > 0 ? 12 : 0 }}>
-                {tempItems.map((it) => (
-                  <div key={it.id} className="item-row on" style={{ cursor: "default" }}>
-                    <div
-                      style={{ cursor: "pointer" }}
-                      onClick={() =>
-                        setTempItems((prev) => prev.map((t) => (t.id === it.id ? { ...t, checked: !t.checked } : t)))
-                      }
-                    >
-                      <CheckBox on={it.checked} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>{it.name}</div>
-                    <div
-                      style={{
-                        ...monoStyle,
-                        fontSize: 13.5,
-                        fontWeight: 600,
-                        minWidth: 56,
-                        textAlign: "right",
-                        color: it.checked ? palette.text : palette.textFaint,
-                      }}
-                    >
-                      {formatWeight(it.weight)}
-                    </div>
-                    <button
-                      className="icon-btn"
-                      title="移除"
-                      onClick={() => setTempItems((prev) => prev.filter((t) => t.id !== it.id))}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+            {!isLibrary && (
+              <section style={panelStyle}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <Plus size={16} color={palette.moss} />
+                    <span style={headingStyle}>{TEMP_CATEGORY_TITLE}</span>
+                    <span style={{ fontSize: 11.5, color: palette.textFaint }}>（借用、租的、只帶這次的）</span>
                   </div>
-                ))}
-              </div>
+                  {tempItems.length > 0 && (
+                    <span style={{ ...monoStyle, fontSize: 13, color: palette.textMuted }}>
+                      {isWeightMode ? formatWeight(tempTotal) : `${tempChecked.length} / ${tempItems.length}`}
+                    </span>
+                  )}
+                </div>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input
-                  className="mini-input"
-                  style={{ flex: "2 1 160px" }}
-                  placeholder="品項名稱，例如：租借頭盔"
-                  value={newTempName}
-                  onChange={(e) => setNewTempName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTempItem()}
-                />
-                <input
-                  className="mini-input"
-                  style={{ flex: "1 1 80px" }}
-                  placeholder="重量 (g)"
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  value={newTempWeight}
-                  onChange={(e) => setNewTempWeight(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTempItem()}
-                />
-                <button className="action-btn" onClick={addTempItem}>
-                  <Plus size={14} /> 加入
-                </button>
-              </div>
-            </section>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: tempItems.length > 0 ? 12 : 0 }}>
+                  {tempItems.map((it) => (
+                    <div key={it.id} className="item-row on" style={{ cursor: "default" }}>
+                      <div
+                        style={{ cursor: "pointer" }}
+                        onClick={() =>
+                          setTempItems((prev) => prev.map((t) => (t.id === it.id ? { ...t, checked: !t.checked } : t)))
+                        }
+                      >
+                        <CheckBox on={it.checked} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>{it.name}</div>
+                      {(isWeightMode || hasWeight(it.weight)) && (
+                        <div
+                          style={{
+                            ...monoStyle,
+                            fontSize: isWeightMode ? 13.5 : 12,
+                            fontWeight: 600,
+                            minWidth: 50,
+                            textAlign: "right",
+                            color: isWeightMode && it.checked ? palette.text : palette.textFaint,
+                          }}
+                        >
+                          {formatWeight(it.weight)}
+                        </div>
+                      )}
+                      <button
+                        className="icon-btn"
+                        title="移除"
+                        onClick={() => setTempItems((prev) => prev.filter((t) => t.id !== it.id))}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    className="mini-input"
+                    style={{ flex: "2 1 160px" }}
+                    placeholder={isWeightMode ? "品項名稱，例如：租借頭盔" : "品項名稱，例如：租的雪板"}
+                    value={newTempName}
+                    onChange={(e) => setNewTempName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addTempItem()}
+                  />
+                  <input
+                    className="mini-input"
+                    style={{ flex: "1 1 80px" }}
+                    placeholder={isWeightMode ? "重量 (g)" : "重量 (可不填)"}
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    value={newTempWeight}
+                    onChange={(e) => setNewTempWeight(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addTempItem()}
+                  />
+                  <button className="action-btn" onClick={addTempItem}>
+                    <Plus size={14} /> 加入
+                  </button>
+                </div>
+              </section>
+            )}
 
             {/* 歷史紀錄 */}
             <section style={panelStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                 <History size={16} color={palette.moss} />
-                <span style={headingStyle}>歷史裝備紀錄</span>
+                <span style={headingStyle}>{isLibrary ? "所有歷史紀錄" : `${activity.title}歷史紀錄`}</span>
               </div>
 
               {!dataReady ? (
@@ -1124,36 +1378,45 @@ function GearReckoner() {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sortedRecords.map((r) => (
-                    <div key={r.id} className="record-card">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 14 }}>{r.title}</div>
-                          <div style={{ fontSize: 11.5, color: palette.textFaint, marginTop: 2 }}>
-                            {formatDate(r.date)} · {r.items.length} 件
+                  {sortedRecords.map((r) => {
+                    const ra = activityOf(r.activity);
+                    const RIcon = ICONS[ra.icon];
+                    return (
+                      <div key={r.id} className="record-card">
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>{r.title}</div>
+                            <div style={{ fontSize: 11.5, color: palette.textFaint, marginTop: 3, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                              {isLibrary && (
+                                <span className="act-badge">
+                                  <RIcon size={10} /> {ra.title}
+                                </span>
+                              )}
+                              {formatDate(r.date)} · {r.items.length} 件
+                            </div>
+                          </div>
+                          <div style={{ ...monoStyle, fontSize: 15, fontWeight: 700, color: palette.amber, whiteSpace: "nowrap" }}>
+                            {ra.mode === "weight" ? `${(r.total / 1000).toFixed(2)} kg` : `${r.items.length} 件`}
                           </div>
                         </div>
-                        <div style={{ ...monoStyle, fontSize: 15, fontWeight: 700, color: palette.amber, whiteSpace: "nowrap" }}>
-                          {(r.total / 1000).toFixed(2)} kg
+                        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                          <button className="action-btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => handleLoadRecord(r)}>
+                            <FolderOpen size={12} /> 載入
+                          </button>
+                          <button className="action-btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => handleExportRecordImage(r)}>
+                            <Download size={12} /> 圖片
+                          </button>
+                          <button
+                            className="action-btn"
+                            style={{ padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}
+                            onClick={() => handleDeleteRecord(r)}
+                          >
+                            <Trash2 size={12} /> 刪除
+                          </button>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                        <button className="action-btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => handleLoadRecord(r)}>
-                          <FolderOpen size={12} /> 載入
-                        </button>
-                        <button className="action-btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => handleExportRecordImage(r)}>
-                          <Download size={12} /> 圖片
-                        </button>
-                        <button
-                          className="action-btn"
-                          style={{ padding: "6px 10px", fontSize: 12, marginLeft: "auto" }}
-                          onClick={() => handleDeleteRecord(r)}
-                        >
-                          <Trash2 size={12} /> 刪除
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -1165,7 +1428,7 @@ function GearReckoner() {
                 <span style={headingStyle}>資料備份</span>
               </div>
               <p style={{ fontSize: 12.5, color: palette.textMuted, margin: "0 0 12px", lineHeight: 1.6 }}>
-                把裝備清單和所有紀錄存成一個備份檔，放在電腦、雲端硬碟或 LINE Keep。萬一資料出問題，用「匯入備份」就能救回來。
+                把整個裝備庫和所有活動的紀錄存成一個備份檔，放在電腦、雲端硬碟或 LINE Keep。萬一資料出問題，用「匯入備份」就能救回來。
               </p>
               <div
                 style={{
@@ -1202,144 +1465,156 @@ function GearReckoner() {
 
           {/* Right: summary */}
           <div style={{ position: "sticky", top: 20, alignSelf: "start" }}>
-            <div style={{ ...panelStyle, padding: 20 }}>
-              <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
-                目前裝備總重
-              </div>
-              <div
-                style={{
-                  fontFamily: "'Space Grotesk', sans-serif",
-                  fontSize: 38,
-                  fontWeight: 700,
-                  lineHeight: 1.1,
-                  color: overTarget ? palette.warn : palette.amber,
-                }}
-              >
-                {(grandTotal / 1000).toFixed(2)}
-                <span style={{ fontSize: 18, color: palette.textMuted }}> kg</span>
-              </div>
-              <div style={{ ...monoStyle, fontSize: 13, color: palette.textMuted, marginTop: 2 }}>
-                {grandTotal.toLocaleString()} g
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: overTarget ? palette.warn : palette.moss,
-                  marginTop: 6,
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
-                {overTarget
-                  ? `超出舒適重量 ${targetG / 1000}kg 目標 ${formatWeight(deltaFromTarget)}`
-                  : `距離舒適重量 ${targetG / 1000}kg 目標還有 ${formatWeight(deltaFromTarget)}`}
-                <button className="text-link" onClick={handleEditTarget}>
-                  <Target size={11} style={{ verticalAlign: -1 }} /> 調整目標
-                </button>
-              </div>
-
-              {/* Mountain gauge */}
-              <div style={{ marginTop: 18, marginBottom: 4 }}>
-                <svg viewBox="0 0 200 180" width="100%" height="150">
-                  <defs>
-                    <linearGradient id="fillGrad" x1="0" y1="1" x2="0" y2="0">
-                      <stop offset="0%" stopColor={palette.amber} />
-                      <stop offset="100%" stopColor={palette.moss} />
-                    </linearGradient>
-                    <clipPath id="mountainClip">
-                      <path d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z" />
-                    </clipPath>
-                  </defs>
-                  {[40, 75, 110, 145].map((y, i) => (
-                    <line key={i} x1="8" y1={y} x2="192" y2={y} stroke={palette.line} strokeWidth="1" strokeDasharray="2 4" />
-                  ))}
-                  <path
-                    d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z"
-                    fill="none"
-                    stroke={palette.textFaint}
-                    strokeWidth="1.5"
-                  />
-                  <g clipPath="url(#mountainClip)">
-                    <rect
-                      x="0"
-                      y={160 - (fillPercent / 100) * 130}
-                      width="200"
-                      height="180"
-                      fill="url(#fillGrad)"
-                      opacity="0.85"
-                    />
-                  </g>
-                  <line x1="10" y1="160" x2="190" y2="160" stroke={palette.textFaint} strokeWidth="1.5" />
-                  <line
-                    x1="6"
-                    y1={160 - (targetPercent / 100) * 130}
-                    x2="194"
-                    y2={160 - (targetPercent / 100) * 130}
-                    stroke={palette.warn}
-                    strokeWidth="1.5"
-                    strokeDasharray="5 3"
-                  />
-                  <text
-                    x="196"
-                    y={160 - (targetPercent / 100) * 130 + 4}
-                    fontSize="9"
-                    fill={palette.warn}
-                    textAnchor="end"
-                    fontFamily="'JetBrains Mono', monospace"
-                  >
-                    {targetG / 1000}kg 目標
-                  </text>
-                </svg>
+            {isLibrary ? (
+              <LibrarySummary gear={gear} panelStyle={panelStyle} />
+            ) : isWeightMode ? (
+              <div style={{ ...panelStyle, padding: 20 }}>
+                <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
+                  目前裝備總重
+                </div>
                 <div
                   style={{
-                    ...monoStyle,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 10,
-                    color: palette.textFaint,
-                    marginTop: -6,
+                    fontFamily: "'Space Grotesk', sans-serif",
+                    fontSize: 38,
+                    fontWeight: 700,
+                    lineHeight: 1.1,
+                    color: overTarget ? palette.warn : palette.amber,
                   }}
                 >
-                  <span>0 kg</span>
-                  <span>量規滿刻度 {maxScaleG / 1000} kg</span>
+                  {(grandTotal / 1000).toFixed(2)}
+                  <span style={{ fontSize: 18, color: palette.textMuted }}> kg</span>
                 </div>
-              </div>
+                <div style={{ ...monoStyle, fontSize: 13, color: palette.textMuted, marginTop: 2 }}>
+                  {grandTotal.toLocaleString()} g · {checkedCount} 件
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: overTarget ? palette.warn : palette.moss,
+                    marginTop: 6,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {overTarget
+                    ? `超出舒適重量 ${targetG / 1000}kg 目標 ${formatWeight(deltaFromTarget)}`
+                    : `距離舒適重量 ${targetG / 1000}kg 目標還有 ${formatWeight(deltaFromTarget)}`}
+                  <button className="text-link" onClick={handleEditTarget}>
+                    <Target size={11} style={{ verticalAlign: -1 }} /> 調整目標
+                  </button>
+                </div>
 
-              {/* breakdown bars */}
-              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                {[...catTotals, { key: "temp", label: TEMP_CATEGORY_TITLE, value: tempTotal }]
-                  .filter((row) => row.value > 0)
-                  .map((row) => (
-                    <div key={row.key}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontSize: 11.5,
-                          color: palette.textMuted,
-                          marginBottom: 3,
-                        }}
-                      >
-                        <span>{row.label}</span>
-                        <span style={monoStyle}>{formatWeight(row.value)}</span>
-                      </div>
-                      <div style={{ height: 5, borderRadius: 3, background: palette.panelAlt, overflow: "hidden" }}>
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${grandTotal > 0 ? (row.value / grandTotal) * 100 : 0}%`,
-                            background: palette.moss,
-                            borderRadius: 3,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                {/* Mountain gauge */}
+                <div style={{ marginTop: 18, marginBottom: 4 }}>
+                  <svg viewBox="0 0 200 180" width="100%" height="150">
+                    <defs>
+                      <linearGradient id="fillGrad" x1="0" y1="1" x2="0" y2="0">
+                        <stop offset="0%" stopColor={palette.amber} />
+                        <stop offset="100%" stopColor={palette.moss} />
+                      </linearGradient>
+                      <clipPath id="mountainClip">
+                        <path d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z" />
+                      </clipPath>
+                    </defs>
+                    {[40, 75, 110, 145].map((y, i) => (
+                      <line key={i} x1="8" y1={y} x2="192" y2={y} stroke={palette.line} strokeWidth="1" strokeDasharray="2 4" />
+                    ))}
+                    <path
+                      d="M10 160 L60 70 L85 100 L120 40 L150 90 L190 160 Z"
+                      fill="none"
+                      stroke={palette.textFaint}
+                      strokeWidth="1.5"
+                    />
+                    <g clipPath="url(#mountainClip)">
+                      <rect
+                        x="0"
+                        y={160 - (fillPercent / 100) * 130}
+                        width="200"
+                        height="180"
+                        fill="url(#fillGrad)"
+                        opacity="0.85"
+                      />
+                    </g>
+                    <line x1="10" y1="160" x2="190" y2="160" stroke={palette.textFaint} strokeWidth="1.5" />
+                    <line
+                      x1="6"
+                      y1={160 - (targetPercent / 100) * 130}
+                      x2="194"
+                      y2={160 - (targetPercent / 100) * 130}
+                      stroke={palette.warn}
+                      strokeWidth="1.5"
+                      strokeDasharray="5 3"
+                    />
+                    <text
+                      x="196"
+                      y={160 - (targetPercent / 100) * 130 + 4}
+                      fontSize="9"
+                      fill={palette.warn}
+                      textAnchor="end"
+                      fontFamily="'JetBrains Mono', monospace"
+                    >
+                      {targetG / 1000}kg 目標
+                    </text>
+                  </svg>
+                  <div
+                    style={{
+                      ...monoStyle,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 10,
+                      color: palette.textFaint,
+                      marginTop: -6,
+                    }}
+                  >
+                    <span>0 kg</span>
+                    <span>量規滿刻度 {maxScaleG / 1000} kg</span>
+                  </div>
+                </div>
+
+                <Breakdown
+                  rows={[...catTotals, { key: "temp", label: TEMP_CATEGORY_TITLE, value: tempTotal }]
+                    .filter((row) => row.value > 0)
+                    .map((row) => ({ key: row.key, label: row.label, text: formatWeight(row.value), ratio: grandTotal > 0 ? row.value / grandTotal : 0 }))}
+                />
               </div>
-            </div>
+            ) : (
+              <div style={{ ...panelStyle, padding: 20 }}>
+                <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
+                  已準備的裝備
+                </div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 38, fontWeight: 700, lineHeight: 1.1, color: palette.amber }}>
+                  {checkedCount}
+                  <span style={{ fontSize: 18, color: palette.textMuted }}> / {itemCount} 件</span>
+                </div>
+                {grandTotal > 0 && (
+                  <div style={{ ...monoStyle, fontSize: 12, color: palette.textFaint, marginTop: 4 }}>
+                    參考重量 {formatWeight(grandTotal)}（有填重量的才算）
+                  </div>
+                )}
+                <div style={{ height: 8, borderRadius: 4, background: palette.panelAlt, overflow: "hidden", marginTop: 14 }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${itemCount > 0 ? (checkedCount / itemCount) * 100 : 0}%`,
+                      background: palette.moss,
+                      borderRadius: 4,
+                      transition: "width 0.2s",
+                    }}
+                  />
+                </div>
+                <Breakdown
+                  rows={[
+                    ...catTotals.map((c) => ({ key: c.key, label: c.label, text: `${c.count} / ${c.total}`, ratio: c.total ? c.count / c.total : 0 })),
+                    ...(tempItems.length
+                      ? [{ key: "temp", label: TEMP_CATEGORY_TITLE, text: `${tempChecked.length} / ${tempItems.length}`, ratio: tempChecked.length / tempItems.length }]
+                      : []),
+                  ]}
+                />
+              </div>
+            )}
 
             <div
               style={{
@@ -1357,9 +1632,11 @@ function GearReckoner() {
             >
               <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
               <span>
-                儲存的紀錄會保留當下完整的品名與重量，之後修改或刪除清單裡的裝備，不會影響舊紀錄。
+                {isLibrary
+                  ? "點裝備可以修改名稱、重量和活動標籤。刪除裝備會從所有活動移除。"
+                  : "儲存的紀錄會保留當下完整的品名與重量，之後修改或刪除裝備，不會影響舊紀錄。每個活動的勾選內容各自分開。"}
                 {user
-                  ? "裝備清單、紀錄和目前勾選的內容都存在你的 Google 帳號雲端空間，手機和電腦登入同一帳號即自動同步，僅你可見。"
+                  ? "資料存在你的 Google 帳號雲端空間，手機和電腦登入同一帳號即自動同步，僅你可見。"
                   : "目前資料只存在這台裝置，登入後會自動搬上雲端。"}
               </span>
             </div>
@@ -1371,28 +1648,44 @@ function GearReckoner() {
         </div>
       </div>
 
-      {/* 手機版：底部固定顯示總重 */}
+      {/* 手機版：底部固定顯示總重 / 件數 */}
       <div className="mobile-total-bar">
-        <span style={{ fontSize: 12, color: palette.textMuted }}>總重</span>
-        <span
-          style={{
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontSize: 22,
-            fontWeight: 700,
-            color: overTarget ? palette.warn : palette.amber,
-          }}
-        >
-          {(grandTotal / 1000).toFixed(2)}
-          <span style={{ fontSize: 13, color: palette.textMuted }}> kg</span>
-        </span>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: overTarget ? palette.warn : palette.moss }}>
-          {overTarget ? `超標 ${formatWeight(deltaFromTarget)}` : `餘裕 ${formatWeight(deltaFromTarget)}`}
-        </span>
+        {isLibrary ? (
+          <span style={{ fontSize: 13, color: palette.textMuted }}>
+            裝備庫 <b style={{ color: palette.amber, fontSize: 18 }}>{gear.length}</b> 件
+          </span>
+        ) : isWeightMode ? (
+          <>
+            <span style={{ fontSize: 12, color: palette.textMuted }}>總重</span>
+            <span
+              style={{
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: 22,
+                fontWeight: 700,
+                color: overTarget ? palette.warn : palette.amber,
+              }}
+            >
+              {(grandTotal / 1000).toFixed(2)}
+              <span style={{ fontSize: 13, color: palette.textMuted }}> kg</span>
+            </span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: overTarget ? palette.warn : palette.moss }}>
+              {overTarget ? `超標 ${formatWeight(deltaFromTarget)}` : `餘裕 ${formatWeight(deltaFromTarget)}`}
+            </span>
+          </>
+        ) : (
+          <>
+            <ListChecks size={18} color={palette.moss} />
+            <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700, color: palette.amber }}>
+              {checkedCount}
+              <span style={{ fontSize: 13, color: palette.textMuted }}> / {itemCount} 件</span>
+            </span>
+          </>
+        )}
         {dataReady && (
           <button
             className="action-btn primary"
             style={{ marginLeft: "auto", padding: "7px 12px" }}
-            onClick={() => setEditor({ item: {} })}
+            onClick={() => openNewGear()}
           >
             <Plus size={14} /> 裝備
           </button>
@@ -1410,6 +1703,58 @@ function GearReckoner() {
           onClose={() => setEditor(null)}
         />
       )}
+
+      {picker && (
+        <LibraryPicker
+          activity={activity}
+          gear={notInView}
+          categories={categories}
+          onAdd={handleAddFromLibrary}
+          onClose={() => setPicker(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// 右側的分類小計長條
+function Breakdown({ rows }) {
+  return (
+    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+      {rows.map((row) => (
+        <div key={row.key}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: palette.textMuted, marginBottom: 3 }}>
+            <span>{row.label}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{row.text}</span>
+          </div>
+          <div style={{ height: 5, borderRadius: 3, background: palette.panelAlt, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${row.ratio * 100}%`, background: palette.moss, borderRadius: 3 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 「全部裝備」右側：每個活動有幾件
+function LibrarySummary({ gear, panelStyle }) {
+  const untagged = gear.filter((g) => g.activities.length === 0).length;
+  return (
+    <div style={{ ...panelStyle, padding: 20 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>裝備庫</div>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 38, fontWeight: 700, lineHeight: 1.1, color: palette.amber }}>
+        {gear.length}
+        <span style={{ fontSize: 18, color: palette.textMuted }}> 件</span>
+      </div>
+      <Breakdown
+        rows={[
+          ...ACTIVITIES.map((a) => {
+            const n = gear.filter((g) => g.activities.includes(a.key)).length;
+            return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0 };
+          }),
+          ...(untagged ? [{ key: "none", label: "未分活動", text: `${untagged} 件`, ratio: untagged / gear.length }] : []),
+        ]}
+      />
     </div>
   );
 }
@@ -1540,7 +1885,7 @@ function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
                       {it.name}
                       {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
                     </div>
-                    <span style={mono}>{formatWeight(it.weight)}</span>
+                    {hasWeight(it.weight) && <span style={mono}>{formatWeight(it.weight)}</span>}
                   </div>
                 ))}
               </SortableList>
@@ -1564,31 +1909,49 @@ function CheckBox({ on }) {
   );
 }
 
-// ------------------------------------------------------------
-// 新增 / 修改裝備的面板（像記帳 App：先選類別，再填名稱、附註、重量）
-// ------------------------------------------------------------
-function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDeleteCategory, onClose }) {
-  const isNew = !item.id;
-  const [category, setCategory] = useState(item.category || "");
-  const [name, setName] = useState(item.name || "");
-  const [note, setNote] = useState(item.note || "");
-  const [weight, setWeight] = useState(item.weight != null ? String(item.weight) : "");
-  const [error, setError] = useState("");
-
+function useEscape(onClose) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+}
 
+// ------------------------------------------------------------
+// 新增 / 修改裝備的面板（像記帳 App：先選活動、類別，再填名稱、附註、重量）
+// ------------------------------------------------------------
+function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDeleteCategory, onClose }) {
+  const isNew = !item.id;
+  const [acts, setActs] = useState(item.activities || []);
+  const [category, setCategory] = useState(item.category || "");
+  const [name, setName] = useState(item.name || "");
+  const [note, setNote] = useState(item.note || "");
+  const [weight, setWeight] = useState(hasWeight(item.weight) ? String(item.weight) : "");
+  const [error, setError] = useState("");
+  useEscape(onClose);
+
+  const weightMatters = acts.some((a) => activityOf(a).mode === "weight");
+  // 只顯示跟選到的活動有關的類別（共用類別、自訂類別、目前已選的類別一定會顯示）
+  const shownCategories = categories.filter(
+    (c) => c.key === category || !c.activities || acts.length === 0 || c.activities.some((a) => acts.includes(a))
+  );
   const selectedCat = categories.find((c) => c.key === category);
+
+  const toggleAct = (key) => setActs((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
   const submit = () => {
     const w = parseFloat(weight);
     if (!category) return setError("請先選一個類別");
     if (!name.trim()) return setError("請填裝備名稱");
-    if (isNaN(w) || w <= 0) return setError("請填大於 0 的重量（公克）");
-    onSave({ ...item, category, name: name.trim(), note: note.trim(), weight: Math.round(w * 10) / 10 });
+    if (weight.trim() && (isNaN(w) || w < 0)) return setError("重量請填數字（公克），或留空");
+    onSave({
+      ...item,
+      activities: ACTIVITIES.map((a) => a.key).filter((k) => acts.includes(k)),
+      category,
+      name: name.trim(),
+      note: note.trim(),
+      weight: hasWeight(w) ? Math.round(w * 10) / 10 : null,
+    });
   };
 
   return (
@@ -1603,9 +1966,21 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
           </button>
         </div>
 
+        <span className="field-label">用在哪些活動（可複選）</span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {ACTIVITIES.map((a) => {
+            const Icon = ICONS[a.icon];
+            return (
+              <span key={a.key} className={`act-chip ${acts.includes(a.key) ? "selected" : ""}`} onClick={() => toggleAct(a.key)}>
+                {acts.includes(a.key) ? <Check size={13} /> : <Icon size={13} />} {a.title}
+              </span>
+            );
+          })}
+        </div>
+
         <span className="field-label">大類別</span>
         <div className="cat-grid">
-          {categories.map((c) => {
+          {shownCategories.map((c) => {
             const Icon = ICONS[c.icon] || Tag;
             return (
               <div
@@ -1656,13 +2031,15 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
           onChange={(e) => setNote(e.target.value)}
         />
 
-        <label className="field-label">重量（公克 g）</label>
+        <label className="field-label">
+          重量（公克 g）{weightMatters ? "・登山會用來算總重" : "・可不填"}
+        </label>
         <input
           className="title-input"
           type="number"
           inputMode="decimal"
           min="0"
-          placeholder="例如：269"
+          placeholder={weightMatters ? "例如：269" : "可不填"}
           value={weight}
           onChange={(e) => setWeight(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -1681,6 +2058,67 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
           </button>
           <button className="action-btn primary" onClick={submit}>
             <Save size={14} /> {isNew ? "新增" : "儲存"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// 從裝備庫加入：把已經有的裝備貼上目前活動的標籤
+// ------------------------------------------------------------
+function LibraryPicker({ activity, gear, categories, onAdd, onClose }) {
+  const [selected, setSelected] = useState([]);
+  useEscape(onClose);
+  const toggle = (id) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const known = new Set(categories.map((c) => c.key));
+  const groups = categories
+    .map((cat) => ({
+      ...cat,
+      items: gear.filter((g) => g.category === cat.key || (cat.key === "other" && !known.has(g.category))),
+    }))
+    .filter((c) => c.items.length > 0);
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17 }}>
+            從裝備庫加入{activity.title}
+          </span>
+          <button className="icon-btn" onClick={onClose} title="關閉">
+            <X size={18} />
+          </button>
+        </div>
+        <p style={{ fontSize: 12.5, color: palette.textMuted, margin: "6px 0 12px", lineHeight: 1.6 }}>
+          勾選要一起用在{activity.title}的裝備。裝備還是同一件，改重量或名稱時每個活動都會一起更新。
+        </p>
+        {groups.map((cat) => {
+          const Icon = ICONS[cat.icon] || Tag;
+          return (
+            <div key={cat.key} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: palette.moss, fontWeight: 600, marginBottom: 4 }}>
+                <Icon size={13} /> {cat.title}
+              </div>
+              {cat.items.map((g) => (
+                <div key={g.id} className={`item-row ${selected.includes(g.id) ? "on" : ""}`} onClick={() => toggle(g.id)}>
+                  <CheckBox on={selected.includes(g.id)} />
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>
+                    {g.name}
+                    {g.note && <span style={{ color: palette.textFaint }}> · {g.note}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        <div style={{ display: "flex", gap: 8, marginTop: 8, position: "sticky", bottom: 0, background: palette.panel, paddingTop: 8 }}>
+          <button className="action-btn" style={{ marginLeft: "auto" }} onClick={onClose}>
+            取消
+          </button>
+          <button className="action-btn primary" disabled={selected.length === 0} onClick={() => onAdd(selected)}>
+            <Plus size={14} /> 加入 {selected.length || ""} 件
           </button>
         </div>
       </div>
