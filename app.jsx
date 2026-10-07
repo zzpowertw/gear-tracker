@@ -55,7 +55,10 @@ import {
   Bath,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Palette,
+  PartyPopper,
+  RotateCcw,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -72,7 +75,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.5.0";
+const APP_VERSION = "3.6.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -348,7 +351,8 @@ function normalizeBackup(data) {
   };
 }
 
-const EMPTY_DRAFT = { checked: {}, title: "", tempItems: [] };
+// packed：打包模式裡已經裝進包包的裝備 id；packing：目前是否在打包畫面（關掉 App 再打開會回到這裡）
+const EMPTY_DRAFT = { checked: {}, title: "", tempItems: [], packed: {}, packing: false };
 
 function GearReckoner() {
   const [initialDraft] = useState(loadDraft);
@@ -386,6 +390,10 @@ function GearReckoner() {
   const setChecked = (u, act) => updateDraft("checked", u, act);
   const setTitle = (u) => updateDraft("title", u);
   const setTempItems = (u) => updateDraft("tempItems", u);
+  const packed = cur.packed || {};
+  const packing = !isLibrary && !!cur.packing;
+  const setPacked = (u) => updateDraft("packed", u);
+  const setPacking = (v) => updateDraft("packing", v);
 
   const [newTempName, setNewTempName] = useState("");
   const [newTempWeight, setNewTempWeight] = useState("");
@@ -819,8 +827,12 @@ function GearReckoner() {
         items: currentItems(),
         total: grandTotal,
       });
+      // 存好紀錄 = 這趟出門準備完成 → 清掉打包進度，下次重新開始
+      setDrafts((prev) => ({ ...prev, [view]: { ...EMPTY_DRAFT, ...prev[view], packed: {}, packing: false } }));
+      return true;
     } catch (e) {
       alert(`儲存失敗：${e.message}`);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1116,6 +1128,56 @@ function GearReckoner() {
           border-radius: 6px; font-size: 13px; font-weight: 600; color: ${palette.textMuted};
         }
         .tab-btn.active { background: ${palette.panelAlt}; color: ${palette.amber}; }
+        .fullpage {
+          position: fixed; inset: 0; z-index: 30; overflow-y: auto;
+          background: ${palette.bg}; color: ${palette.text};
+        }
+        .fullpage-head {
+          position: sticky; top: 0; z-index: 2; background: ${palette.bg};
+          display: flex; align-items: center; gap: 8px;
+          max-width: 640px; margin: 0 auto;
+          padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+          border-bottom: 1px solid ${palette.line};
+        }
+        .fullpage-title {
+          flex: 1; text-align: center; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 16px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .fullpage-body { max-width: 640px; margin: 0 auto; padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+        .back-btn {
+          display: flex; align-items: center; gap: 2px; min-width: 70px;
+          background: none; border: none; cursor: pointer; padding: 6px 4px 6px 0;
+          color: ${palette.amber}; font-size: 14px; font-weight: 600;
+        }
+        .pack-progress {
+          background: ${palette.panel}; border: 1px solid ${palette.line}; border-radius: 12px;
+          padding: 10px 12px; margin-bottom: 12px;
+        }
+        .pack-cat {
+          display: flex; align-items: center; gap: 4px;
+          font-size: 12.5px; font-weight: 600; color: ${palette.moss}; margin: 0 0 4px 2px;
+        }
+        .pack-toggle { background: none; border: none; cursor: pointer; padding: 6px 0; }
+        .pack-row {
+          display: flex; align-items: center; gap: 12px; cursor: pointer;
+          padding: 11px 12px; margin-bottom: 4px; border-radius: 10px; font-size: 15px; font-weight: 500;
+          background: ${palette.panel}; border: 1px solid ${palette.line};
+          -webkit-user-select: none; user-select: none;
+        }
+        .pack-row:active { transform: scale(0.99); }
+        .pack-row.packed { opacity: 0.55; text-decoration: line-through; }
+        .pack-check {
+          width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center;
+          border: 2px solid ${palette.textFaint}; color: ${palette.onAccent};
+        }
+        .pack-row.packed .pack-check { background: ${palette.amber}; border-color: ${palette.amber}; }
+        .pack-done {
+          text-align: center; padding: 18px 12px; margin-bottom: 14px; border-radius: 12px;
+          background: ${palette.panel}; border: 1.5px solid ${palette.amber};
+          animation: pop 0.35s ease-out;
+        }
+        @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .menu-row {
           display: flex; align-items: center; gap: 10px; cursor: pointer;
           padding: 11px 10px; border-radius: 9px;
@@ -1205,6 +1267,18 @@ function GearReckoner() {
               </div>
               <button className="action-btn" onClick={handleExportImage}>
                 <Download size={14} /> 匯出圖片
+              </button>
+              <button
+                className="action-btn"
+                onClick={() => setPacking(true)}
+                disabled={checkedCount === 0}
+                title={checkedCount === 0 ? "先勾選要帶的裝備" : undefined}
+              >
+                <Backpack size={14} />
+                {(() => {
+                  const n = currentItems().filter((i) => packed[i.id]).length;
+                  return n > 0 ? `繼續打包 ${n}/${checkedCount}` : `開始打包（${checkedCount} 件）`;
+                })()}
               </button>
               <button className="action-btn primary" onClick={handleSaveRecord} disabled={saving}>
                 {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
@@ -1795,6 +1869,21 @@ function GearReckoner() {
         />
       )}
 
+      {packing && (
+        <PackingView
+          activity={activity}
+          title={title.trim()}
+          items={currentItems()}
+          packed={packed}
+          isWeightMode={isWeightMode}
+          saving={saving}
+          onToggle={(id) => setPacked((prev) => ({ ...prev, [id]: !prev[id] }))}
+          onReset={() => confirm("要清除打包進度，重新開始嗎？") && setPacked({})}
+          onBack={() => setPacking(false)}
+          onSave={handleSaveRecord}
+        />
+      )}
+
       {settingsOpen && (
         <SettingsSheet
           themeKey={themeKey}
@@ -1820,12 +1909,11 @@ function GearReckoner() {
 }
 
 // ------------------------------------------------------------
-// 設定：第一層是選單，點進去是各個設定頁
+// 設定（全螢幕）：第一層是選單，點進去是各個設定頁
 // 之後要加新的設定，在 pages 加一項、再加一個對應的頁面即可
 // ------------------------------------------------------------
 function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryReorder, onClose }) {
   const [page, setPage] = useState(null); // null = 選單
-  useEscape(() => (page ? setPage(null) : onClose()));
 
   const pages = [
     {
@@ -1839,22 +1927,7 @@ function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryRe
   const current = pages.find((p) => p.key === page);
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
-          {current && (
-            <button className="icon-btn" style={{ marginLeft: -6 }} onClick={() => setPage(null)} title="回到設定">
-              <ChevronLeft size={20} />
-            </button>
-          )}
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, flex: 1 }}>
-            {current ? current.title : "設定"}
-          </span>
-          <button className="icon-btn" onClick={onClose} title="關閉">
-            <X size={18} />
-          </button>
-        </div>
-
+    <FullPage title={current ? current.title : "設定"} backLabel={current ? "設定" : "返回"} onBack={() => (page ? setPage(null) : onClose())}>
         {!current && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {pages.map((p) => (
@@ -1929,9 +2002,148 @@ function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryRe
             </SortableList>
           </>
         )}
+    </FullPage>
+  );
+}
+
+// ------------------------------------------------------------
+// 全螢幕頁面：內容從上方開始排（不會因為內容多寡而上下彈跳），左上角返回
+// ------------------------------------------------------------
+function FullPage({ title, backLabel = "返回", onBack, right, children }) {
+  useEscape(onBack);
+  // 開著的時候，後面的主畫面不要跟著捲動
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+  return (
+    <div className="fullpage">
+      <div className="fullpage-head">
+        <button className="back-btn" onClick={onBack}>
+          <ChevronLeft size={20} /> {backLabel}
+        </button>
+        <span className="fullpage-title">{title}</span>
+        <div style={{ minWidth: 70, display: "flex", justifyContent: "flex-end" }}>{right}</div>
       </div>
+      <div className="fullpage-body">{children}</div>
     </div>
   );
+}
+
+// ------------------------------------------------------------
+// 打包模式：照著勾好的清單，一件一件確認真的裝進包包
+// 點一下 = 已打包（收到下方「已打包」）；再點一下可以取消
+// ------------------------------------------------------------
+function PackingView({ activity, title, items, packed, isWeightMode, saving, onToggle, onReset, onBack, onSave }) {
+  const [showPacked, setShowPacked] = useState(false);
+  const todo = items.filter((i) => !packed[i.id]);
+  const done = items.filter((i) => packed[i.id]);
+  const allDone = items.length > 0 && todo.length === 0;
+  const sum = (list) => list.reduce((s, i) => s + (hasWeight(i.weight) ? i.weight : 0), 0);
+  const pct = items.length ? (done.length / items.length) * 100 : 0;
+
+  const prevDone = useRef(allDone);
+  useEffect(() => {
+    if (allDone && !prevDone.current && navigator.vibrate) navigator.vibrate([20, 40, 20]);
+    prevDone.current = allDone;
+  }, [allDone]);
+
+  // 用一般函式產生每一行（不是元件），點擊時不會整排重建
+  const row = (it, isPacked) => (
+    <div key={it.id} className={`pack-row ${isPacked ? "packed" : ""}`} onClick={() => onToggle(it.id)}>
+      <span className="pack-check">{isPacked && <Check size={14} />}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {it.name}
+        {it.note && <span style={{ color: palette.textFaint, fontSize: 13 }}> · {it.note}</span>}
+      </div>
+      {hasWeight(it.weight) && (
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, color: palette.textFaint }}>
+          {formatWeight(it.weight)}
+        </span>
+      )}
+    </div>
+  );
+
+  return (
+    <FullPage
+      title={`打包中：${title || activity.title}`}
+      backLabel="規劃"
+      onBack={onBack}
+      right={
+        done.length > 0 && (
+          <button className="text-link" onClick={onReset} title="清除打包進度">
+            <RotateCcw size={12} style={{ verticalAlign: -1 }} /> 重新打包
+          </button>
+        )
+      }
+    >
+      {/* 進度 */}
+      <div className="pack-progress">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 700, color: palette.amber }}>
+            {done.length}
+            <span style={{ fontSize: 15, color: palette.textMuted }}> / {items.length} 件</span>
+          </span>
+          {isWeightMode && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, color: palette.textMuted, marginLeft: "auto" }}>
+              {(sum(done) / 1000).toFixed(2)} / {(sum(items) / 1000).toFixed(2)} kg
+            </span>
+          )}
+        </div>
+        <div style={{ height: 8, borderRadius: 4, background: palette.panelAlt, overflow: "hidden", marginTop: 6 }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: palette.amber, borderRadius: 4, transition: "width 0.25s" }} />
+        </div>
+      </div>
+
+      {allDone && (
+        <div className="pack-done">
+          <PartyPopper size={30} style={{ color: palette.amber }} />
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, marginTop: 6 }}>全部打包完成！</div>
+          <div style={{ fontSize: 13, color: palette.textMuted, marginTop: 4 }}>祝{activity.title}順利 🎉</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12, flexWrap: "wrap" }}>
+            <button className="action-btn primary" disabled={saving} onClick={async () => (await onSave()) && onBack()}>
+              {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />} 儲存這筆紀錄
+            </button>
+            <button className="action-btn" onClick={onBack}>
+              先不用
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 還沒打包的，依類別分組 */}
+      {itemsToGroups(todo).map((g) => (
+        <div key={g.title} style={{ marginBottom: 10 }}>
+          <div className="pack-cat">{g.title}</div>
+          {g.items.map((it) => row(it, false))}
+        </div>
+      ))}
+
+      {/* 已打包：收起來，點開可以看、可以取消 */}
+      {done.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <button className="pack-cat pack-toggle" onClick={() => setShowPacked((v) => !v)}>
+            {showPacked ? <ChevronDown size={14} /> : <ChevronRight size={14} />} 已打包（{done.length}）
+          </button>
+          {showPacked && done.map((it) => row(it, true))}
+        </div>
+      )}
+    </FullPage>
+  );
+}
+
+// 打包清單依類別分組（保留原本順序）
+function itemsToGroups(items) {
+  const groups = [];
+  items.forEach((it) => {
+    let g = groups.find((x) => x.title === it.cat);
+    if (!g) groups.push((g = { title: it.cat, items: [] }));
+    g.items.push(it);
+  });
+  return groups;
 }
 
 // 「全部裝備」每件裝備右邊的活動小圓點

@@ -10,6 +10,7 @@ Personal multi-activity gear list PWA (hiking = weight mode; diving / skiing / c
 - `sw.js` — network-first for own files, cache-first for pinned CDN URLs. On the first open after a release the *previous* SW may still serve a stale index.html, so never make new app.jsx depend on index.html changes (no new import-map entries; dynamic-import new libs by full URL).
 - Theme: user picks one of `THEMES` (purple / green / khaki) in ⚙ settings; stored in `meta.settings.theme` + localStorage `gear-theme`; applied as CSS variables (`palette.*` are `var(--*)` strings; canvas export uses the real hex values).
 - New gear is created only in the 「全部裝備」 view; activity views add gear by tagging via 「從裝備庫加入」.
+- Packing mode: per-activity draft fields `packed` ({id:true}) and `packing` (bool); `PackingView` lists `currentItems()`; saving a record clears both. Full-screen pages use `FullPage` (settings, packing).
 - Gear rows reorder by long-press drag (`SortableList longPress`, within a category; `justDragged()` swallows the click after a drag). Category order is edited in the ⚙ settings sheet.
 - Hosting: GitHub Pages from `main` branch root → https://zzpowertw.github.io/gear-tracker/
 
