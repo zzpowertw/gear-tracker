@@ -75,7 +75,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.6.2";
+const APP_VERSION = "3.6.3";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -1069,6 +1069,15 @@ function GearReckoner() {
           border-radius: 16px 16px 0 0; width: 100%; max-width: 520px;
           max-height: 92vh; overflow-y: auto;
           padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+        }
+        /* 面板底部固定的按鈕列：往下延伸蓋住面板的下留白，捲動的清單才不會從下面透出來 */
+        .sheet-footer {
+          position: sticky; z-index: 1;
+          bottom: calc(-18px - env(safe-area-inset-bottom));
+          display: flex; justify-content: flex-end; gap: 8px;
+          margin: 8px -16px calc(-18px - env(safe-area-inset-bottom));
+          padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+          background: ${palette.panel}; border-top: 1px solid ${palette.line};
         }
         @media (min-width: 600px) {
           .sheet-backdrop { align-items: center; }
@@ -2490,12 +2499,12 @@ function LibraryPicker({ activity, gear, categories, onAdd, onClose }) {
             </div>
           );
         })}
-        <div style={{ display: "flex", gap: 8, marginTop: 8, position: "sticky", bottom: 0, background: palette.panel, paddingTop: 8 }}>
-          <button className="action-btn" style={{ marginLeft: "auto" }} onClick={onClose}>
+        <div className="sheet-footer">
+          <button className="action-btn" onClick={onClose}>
             取消
           </button>
           <button className="action-btn primary" disabled={selected.length === 0} onClick={() => onAdd(selected)}>
-            <Plus size={14} /> 加入 {selected.length || ""} 件
+            <Plus size={14} /> {selected.length ? `加入 ${selected.length} 件` : "加入"}
           </button>
         </div>
       </div>
