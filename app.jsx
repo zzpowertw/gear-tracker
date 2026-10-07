@@ -51,6 +51,8 @@ import {
   Library,
   ListChecks,
   Settings,
+  Star,
+  Bath,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -67,7 +69,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -82,6 +84,7 @@ const ALL = "all"; // 「全部裝備」：管理裝備庫
 const ICONS = {
   Footprints, Shirt, Backpack, Tent, CookingPot, Droplet, Flashlight, Smartphone, Glasses, Cross, Package, Tag,
   Mountain, Waves, Snowflake, LifeBuoy, Wind, Watch, Weight, MountainSnow, HardHat, Armchair, BedDouble, Layers,
+  Star, Bath,
 };
 
 const hasWeight = (w) => typeof w === "number" && w > 0;
@@ -574,12 +577,14 @@ function GearReckoner() {
       ...PRESET_CATEGORIES,
       ...(meta.customCategories || []).map((c) => ({ ...c, icon: "Tag", custom: true })),
     ];
-    const order = meta.categoryOrder || [];
-    const rank = (c) => {
-      const i = order.indexOf(c.key);
-      return i === -1 ? order.length + all.indexOf(c) : i;
-    };
-    return [...all].sort((a, b) => rank(a) - rank(b));
+    const merged = (meta.categoryOrder || []).filter((k) => all.some((c) => c.key === k));
+    // 還沒排過的類別（例如新版加的預設類別）：插在它在預設清單裡前一個類別的後面，不打亂使用者排好的順序
+    all.forEach((c, i) => {
+      if (merged.includes(c.key)) return;
+      const prev = all.slice(0, i).reverse().find((p) => merged.includes(p.key));
+      merged.splice(prev ? merged.indexOf(prev.key) + 1 : 0, 0, c.key);
+    });
+    return merged.map((k) => all.find((c) => c.key === k));
   }, [meta.customCategories, meta.categoryOrder]);
 
   const gearByCat = useMemo(() => {

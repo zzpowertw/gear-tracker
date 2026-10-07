@@ -21,11 +21,13 @@ export const DEFAULT_ACTIVITY = "hiking";
 // 類別：所有活動共用同一組（新增裝備時不會因為選了不同活動而變動）
 // icon 對應 app.jsx 裡的 ICONS
 export const PRESET_CATEGORIES = [
+  { key: "main", title: "主要器材", icon: "Star" }, // 各活動最核心的大件：BCD、調節器、雪板、帳篷…
   { key: "shoes", title: "鞋款", icon: "Footprints" },
   { key: "clothing", title: "衣物", icon: "Shirt" },
   { key: "pack", title: "背包", icon: "Backpack" },
   { key: "sleep", title: "睡眠", icon: "BedDouble" },
   { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
+  { key: "toiletries", title: "盥洗衛生", icon: "Bath" },
   { key: "electronics", title: "電子設備", icon: "Smartphone" }, // v2.3 起合併原「電子照明」與「電子設備」
   { key: "accessory", title: "配件", icon: "Glasses" },
   { key: "safety", title: "醫療安全", icon: "Cross" },
@@ -37,13 +39,13 @@ export const PRESET_CATEGORIES = [
 export const CATEGORY_ALIASES = {
   devices: "electronics",
   water: "kitchen",
-  "dive-bcd": "other",
-  "dive-reg": "other",
+  "dive-bcd": "main",
+  "dive-reg": "main",
   "dive-suit": "clothing",
   "dive-computer": "electronics",
   "dive-mask": "accessory",
-  "dive-weight": "other",
-  "ski-board": "other",
+  "dive-weight": "main",
+  "ski-board": "main",
   "ski-boots": "shoes",
   "ski-protect": "accessory",
   "ski-wear": "clothing",
