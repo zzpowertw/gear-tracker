@@ -76,7 +76,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.7.0";
+const APP_VERSION = "3.7.1";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -984,6 +984,12 @@ function GearReckoner() {
     >
       <style>{`
         * { box-sizing: border-box; }
+        :root {
+          /* 底部：只保留跟 Home 橫條錯開需要的距離（原本整段安全區＋內距，下巴太長） */
+          --bottom-pad: max(10px, calc(env(safe-area-inset-bottom) - 16px));
+          /* 頂端：iOS 26 Liquid Glass 的模糊帶會延伸到狀態列下方，固定的活動列要再往下避開 */
+          --top-blur-gap: 14px;
+        }
         button { font-family: inherit; }
         html { scrollbar-width: thin; scrollbar-color: ${palette.line} transparent; }
         .sheet { scrollbar-width: thin; scrollbar-color: ${palette.line} transparent; }
@@ -1077,11 +1083,11 @@ function GearReckoner() {
         .mobile-total-bar {
           position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
           display: flex; align-items: center; gap: 10px;
-          padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+          padding: 8px 16px var(--bottom-pad);
           background: ${palette.panel};
           border-top: 1px solid ${palette.line};
         }
-        .page { padding-bottom: 90px !important; }
+        .page { padding-bottom: calc(70px + var(--bottom-pad)) !important; }
         @media (min-width: 900px) {
           .mobile-total-bar { display: none; }
           .page { padding-bottom: 28px !important; }
@@ -1123,6 +1129,8 @@ function GearReckoner() {
           display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
           position: sticky; top: env(safe-area-inset-top); z-index: 9;
           margin: 0 -12px 10px; padding: 6px 12px; background: ${palette.bg};
+          padding-top: calc(6px + var(--top-blur-gap));
+          margin-top: -10px; /* 抵掉上一列的下間距，平常位置看起來不變；不能再多，否則會蓋到右上角按鈕 */
         }
         .safe-top-cover {
           position: fixed; top: 0; left: 0; right: 0; z-index: 12;
@@ -1136,7 +1144,7 @@ function GearReckoner() {
         .fold-icon.folded { transform: rotate(-90deg); }
         .to-top {
           position: fixed; right: 14px; z-index: 11;
-          bottom: calc(72px + env(safe-area-inset-bottom));
+          bottom: calc(62px + var(--bottom-pad));
           width: 42px; height: 42px; border-radius: 50%;
           display: flex; align-items: center; justify-content: center; cursor: pointer;
           background: ${palette.panel}; color: ${palette.amber};
