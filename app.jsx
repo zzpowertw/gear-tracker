@@ -59,6 +59,7 @@ import {
   Palette,
   PartyPopper,
   RotateCcw,
+  ArrowUp,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -75,7 +76,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.6.4";
+const APP_VERSION = "3.7.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -85,6 +86,7 @@ const DRAFT_PUSH_DELAY_MS = 600; // 停手多久後才上傳，避免打字時�
 const BACKUP_REMIND_DAYS = 30;
 const VIEW_KEY = "gear-view"; // 目前看的活動（只存這台裝置）
 const THEME_KEY = "gear-theme"; // 佈景主題（也存在帳號設定裡，跨裝置同步）
+const COLLAPSED_KEY = "gear-collapsed"; // 收合起來的類別（只存這台裝置）
 const ALL = "all"; // 「全部裝備」：管理裝備庫
 
 const ICONS = {
@@ -399,6 +401,24 @@ function GearReckoner() {
   const [newTempWeight, setNewTempWeight] = useState("");
 
   const [localTheme, setLocalTheme] = useState(loadTheme);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const toggleCollapse = (key) =>
+    setCollapsed((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
+      } catch (e) {
+        // 不影響使用
+      }
+      return next;
+    });
+  const [showToTop, setShowToTop] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
   const [picker, setPicker] = useState(false); // 「從裝備庫加入」面板
@@ -419,6 +439,13 @@ function GearReckoner() {
   }, [view]);
 
   useEffect(() => store.watchAuth(setUser), []);
+
+  // 往下捲一段距離後才出現「回到頂端」按鈕
+  useEffect(() => {
+    const onScroll = () => setShowToTop(window.scrollY > 400);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
     if (user === undefined) return;
@@ -952,7 +979,7 @@ function GearReckoner() {
         color: palette.text,
         fontFamily: "'Inter', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif",
         minHeight: "100vh",
-        padding: "14px 12px",
+        padding: "16px 12px",
       }}
     >
       <style>{`
@@ -1092,7 +1119,31 @@ function GearReckoner() {
         }
         .cat-chip.selected { border-color: ${palette.amber}; color: ${palette.amber}; }
         .cat-chip.add { border-style: dashed; }
-        .act-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin: 0 -12px 10px; padding-left: 12px; padding-right: 12px; scrollbar-width: none; }
+        .act-bar {
+          display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+          position: sticky; top: env(safe-area-inset-top); z-index: 9;
+          margin: 0 -12px 10px; padding: 6px 12px; background: ${palette.bg};
+        }
+        .safe-top-cover {
+          position: fixed; top: 0; left: 0; right: 0; z-index: 12;
+          height: env(safe-area-inset-top); background: ${palette.bg};
+        }
+        .cat-head {
+          display: flex; align-items: center; justify-content: space-between;
+          cursor: pointer; -webkit-user-select: none; user-select: none;
+        }
+        .fold-icon { color: ${palette.textFaint}; transition: transform 0.2s; margin-left: 2px; }
+        .fold-icon.folded { transform: rotate(-90deg); }
+        .to-top {
+          position: fixed; right: 14px; z-index: 11;
+          bottom: calc(72px + env(safe-area-inset-bottom));
+          width: 42px; height: 42px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center; cursor: pointer;
+          background: ${palette.panel}; color: ${palette.amber};
+          border: 1px solid ${palette.line}; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+          animation: pop 0.2s ease-out;
+        }
+        @media (min-width: 900px) { .to-top { bottom: 24px; right: 24px; } }
         .act-bar::-webkit-scrollbar { display: none; }
         .act-tab {
           display: flex; align-items: center; gap: 6px; flex-shrink: 0;
@@ -1193,7 +1244,6 @@ function GearReckoner() {
 
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {/* Header */}
-        <div style={{ marginBottom: 10 }}>
           <div
             style={{
               display: "flex",
@@ -1222,7 +1272,7 @@ function GearReckoner() {
             </div>
           </div>
 
-          {/* 活動切換 */}
+          {/* 活動切換：捲動時固定在頂端（停在 iPhone 狀態列下方） */}
           <div className="act-bar">
             <div className={`act-tab ${isLibrary ? "active" : ""}`} onClick={() => setView(ALL)}>
               <LayoutGrid size={15} /> 全部裝備{" "}
@@ -1240,6 +1290,7 @@ function GearReckoner() {
             })}
           </div>
 
+        <div style={{ marginBottom: 10 }}>
           <h1
             style={{
               fontFamily: "'Space Grotesk', sans-serif",
@@ -1364,9 +1415,15 @@ function GearReckoner() {
                 {gearByCat.map((cat) => {
                   const Icon = ICONS[cat.icon] || Tag;
                   const t = catTotals.find((c) => c.key === cat.key);
+                  const folded = collapsed.includes(cat.key);
                   return (
                     <section key={cat.key} style={panelStyle}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div
+                        className="cat-head"
+                        onClick={() => toggleCollapse(cat.key)}
+                        title={folded ? "點一下展開" : "點一下收合"}
+                        style={{ marginBottom: folded ? 0 : 4 }}
+                      >
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <Icon size={16} style={{ color: palette.moss }} />
                           <span style={headingStyle}>{cat.title}</span>
@@ -1386,14 +1443,19 @@ function GearReckoner() {
                               className="icon-btn"
                               style={{ padding: 4 }}
                               title={`在「${cat.title}」新增裝備`}
-                              onClick={() => openNewGear({ category: cat.key })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openNewGear({ category: cat.key });
+                              }}
                             >
                               <Plus size={15} />
                             </button>
                           )}
+                          <ChevronDown size={16} className={`fold-icon ${folded ? "folded" : ""}`} />
                         </div>
                       </div>
 
+                      {!folded && (
                       <SortableList
                         longPress
                         onMove={(from, to) => reorderGear(cat, from, to)}
@@ -1438,6 +1500,7 @@ function GearReckoner() {
                           </div>
                         ))}
                       </SortableList>
+                      )}
                     </section>
                   );
                 })}
@@ -1810,6 +1873,15 @@ function GearReckoner() {
           Gear Reckoner v{APP_VERSION}
         </div>
       </div>
+
+      {/* iPhone 狀態列那一塊墊上背景色，捲動的內容不會從狀態列底下透出來 */}
+      <div className="safe-top-cover" />
+
+      {showToTop && (
+        <button className="to-top" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="回到最上面">
+          <ArrowUp size={18} />
+        </button>
+      )}
 
       {/* 手機版：底部固定顯示總重 / 件數 */}
       <div className="mobile-total-bar">
