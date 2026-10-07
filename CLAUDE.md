@@ -4,10 +4,12 @@ Personal multi-activity gear list PWA (hiking = weight mode; diving / skiing / c
 
 ## Architecture (no build step)
 - `index.html` loads React / lucide-react from esm.sh via import map (sortablejs is dynamic-imported by full URL in app.jsx), and Babel standalone transpiles `app.jsx` in the browser. No Node/npm needed; don't introduce a bundler without asking.
-- `gear-data.js` — `ACTIVITIES` (key, title, icon, mode), preset categories (optional `activities` = which activities offer them in the editor), sample gear (for "載入範例清單"), and upgrade helpers `normalizeGear` / `normalizeRecord` / `upgradeLegacyRecord`. Sample ids and activity keys must never be renamed.
+- `gear-data.js` — `ACTIVITIES` (key, title, icon, mode, optional `hidden` = not shown but data kept), one shared list of preset categories, sample gear (for "載入範例清單"), and upgrade helpers `normalizeGear` / `normalizeRecord` / `upgradeLegacyRecord`. Sample ids and activity keys must never be renamed.
 - `storage.js` — per-user collections `gear` (`activities: [key]`, optional `order`, `weight` may be null), `records` (`activity`), `meta` (doc `settings`: customCategories, categoryOrder, targetG, lastBackupAt; doc `draft`: `byActivity: { [key]: { checked, title, tempItems } }` plus top-level hiking fields for pre-v3 clients). Not signed in → localStorage; signed in → Firestore `users/{uid}/<collection>` with persistent offline cache. Cloud writes are fire-and-forget (don't await server ack — hangs offline).
 - `firestore.rules` — reference copy; must be pasted into Firebase console manually.
 - `sw.js` — network-first for own files, cache-first for pinned CDN URLs. On the first open after a release the *previous* SW may still serve a stale index.html, so never make new app.jsx depend on index.html changes (no new import-map entries; dynamic-import new libs by full URL).
+- Theme: user picks one of `THEMES` (purple / green / khaki) in ⚙ settings; stored in `meta.settings.theme` + localStorage `gear-theme`; applied as CSS variables (`palette.*` are `var(--*)` strings; canvas export uses the real hex values).
+- New gear is created only in the 「全部裝備」 view; activity views add gear by tagging via 「從裝備庫加入」.
 - Hosting: GitHub Pages from `main` branch root → https://zzpowertw.github.io/gear-tracker/
 
 ## Data compatibility rules (owner's data must survive every update)

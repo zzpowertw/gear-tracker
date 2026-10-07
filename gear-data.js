@@ -12,36 +12,20 @@ export const ACTIVITIES = [
   { key: "hiking", title: "登山", icon: "Mountain", mode: "weight" },
   { key: "diving", title: "潛水", icon: "Waves", mode: "list" },
   { key: "skiing", title: "滑雪", icon: "Snowflake", mode: "list" },
-  { key: "camping", title: "露營", icon: "Tent", mode: "list" },
+  // hidden：暫時不顯示（已有的資料保留），之後要用把 hidden 拿掉即可
+  { key: "camping", title: "露營", icon: "Tent", mode: "list", hidden: true },
 ];
 // v2.x 以前的裝備和紀錄都屬於登山
 export const DEFAULT_ACTIVITY = "hiking";
 
+// 類別：所有活動共用同一組（新增裝備時不會因為選了不同活動而變動）
 // icon 對應 app.jsx 裡的 ICONS
-// activities：新增裝備時，選了這些活動才會出現這個類別；不寫 = 每個活動都適用
 export const PRESET_CATEGORIES = [
   { key: "shoes", title: "鞋款", icon: "Footprints" },
   { key: "clothing", title: "衣物", icon: "Shirt" },
   { key: "pack", title: "背包", icon: "Backpack" },
-  { key: "sleep", title: "睡眠", icon: "BedDouble", activities: ["hiking", "camping"] },
-  { key: "kitchen", title: "炊煮飲食", icon: "CookingPot", activities: ["hiking", "camping"] },
-  { key: "water", title: "水具", icon: "Droplet", activities: ["hiking", "camping"] },
-  // 潛水
-  { key: "dive-bcd", title: "BCD 浮力背心", icon: "LifeBuoy", activities: ["diving"] },
-  { key: "dive-reg", title: "調節器", icon: "Wind", activities: ["diving"] },
-  { key: "dive-suit", title: "防寒衣", icon: "Layers", activities: ["diving"] },
-  { key: "dive-computer", title: "潛水電腦錶", icon: "Watch", activities: ["diving"] },
-  { key: "dive-mask", title: "面鏡・蛙鞋", icon: "Glasses", activities: ["diving"] },
-  { key: "dive-weight", title: "配重", icon: "Weight", activities: ["diving"] },
-  // 滑雪
-  { key: "ski-board", title: "雪板・固定器", icon: "MountainSnow", activities: ["skiing"] },
-  { key: "ski-boots", title: "雪鞋", icon: "Footprints", activities: ["skiing"] },
-  { key: "ski-protect", title: "安全帽・雪鏡・護具", icon: "HardHat", activities: ["skiing"] },
-  { key: "ski-wear", title: "雪衣・雪褲", icon: "Shirt", activities: ["skiing"] },
-  // 露營
-  { key: "camp-shelter", title: "帳篷・天幕", icon: "Tent", activities: ["camping"] },
-  { key: "camp-furniture", title: "桌椅家具", icon: "Armchair", activities: ["camping"] },
-  // 共用
+  { key: "sleep", title: "睡眠", icon: "BedDouble" },
+  { key: "kitchen", title: "炊煮飲食", icon: "CookingPot" },
   { key: "electronics", title: "電子設備", icon: "Smartphone" }, // v2.3 起合併原「電子照明」與「電子設備」
   { key: "accessory", title: "配件", icon: "Glasses" },
   { key: "safety", title: "醫療安全", icon: "Cross" },
@@ -49,7 +33,23 @@ export const PRESET_CATEGORIES = [
 ];
 
 // 已合併/停用的類別 key → 新的 key；App 打開時會自動把裝備搬過去
-export const CATEGORY_ALIASES = { devices: "electronics" };
+// v3.2 精簡類別：水具與各活動專屬類別併入通用類別
+export const CATEGORY_ALIASES = {
+  devices: "electronics",
+  water: "kitchen",
+  "dive-bcd": "other",
+  "dive-reg": "other",
+  "dive-suit": "clothing",
+  "dive-computer": "electronics",
+  "dive-mask": "accessory",
+  "dive-weight": "other",
+  "ski-board": "other",
+  "ski-boots": "shoes",
+  "ski-protect": "accessory",
+  "ski-wear": "clothing",
+  "camp-shelter": "sleep",
+  "camp-furniture": "other",
+};
 
 export const TEMP_CATEGORY_TITLE = "臨時品項";
 export const DEFAULT_TARGET_G = 7000; // 預設舒適重量目標，可在 App 內修改
@@ -70,7 +70,7 @@ export const SAMPLE_GEAR = [
   { id: "naturehike-mat", category: "sleep", name: "Naturehike 羽骨R3.6超輕自動充氣睡墊", note: "黃", weight: 610 },
   { id: "naturehike-pillow", category: "sleep", name: "Naturehike 充氣枕頭", note: "", weight: 110 },
   { id: "sts-aeros-pillow", category: "sleep", name: "Sea to Summit Aeros Pillow Premium", note: "深藍・L 尺寸・包裝標示", weight: 150 },
-  { id: "hydrapak", category: "water", name: "Hydrapak Contour 2L 水袋", note: "空重", weight: 142 },
+  { id: "hydrapak", category: "kitchen", name: "Hydrapak Contour 2L 水袋", note: "空重", weight: 142 },
   { id: "headlamp", category: "electronics", name: "Nitecore NU25 MCT UL 頭燈", note: "", weight: 47 },
   { id: "mt900-poles", category: "accessory", name: "迪卡農 MT900 摺疊登山杖", note: "單支 275g × 2", weight: 550 },
   { id: "trail-hat", category: "accessory", name: "Hoka Trail Run Hat", note: "黑・估算值", weight: 42 },

@@ -50,6 +50,7 @@ import {
   LayoutGrid,
   Library,
   ListChecks,
+  Settings,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -66,7 +67,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -75,6 +76,7 @@ const DRAFT_KEY = "gear-draft";
 const DRAFT_PUSH_DELAY_MS = 600; // 停手多久後才上傳，避免打字時每個字都上傳
 const BACKUP_REMIND_DAYS = 30;
 const VIEW_KEY = "gear-view"; // 目前看的活動（只存這台裝置）
+const THEME_KEY = "gear-theme"; // 佈景主題（也存在帳號設定裡，跨裝置同步）
 const ALL = "all"; // 「全部裝備」：管理裝備庫
 
 const ICONS = {
@@ -99,52 +101,45 @@ function formatDate(iso) {
 }
 
 // ------------------------------------------------------------
-// 主題色：每個活動一套，切換活動時整個畫面跟著換色
+// 佈景主題：在「設定」裡選，整個 App 用同一套顏色
 // amber = 主色（按鈕、重點數字）、moss = 輔色（圖示、進度條）、onAccent = 主色按鈕上的文字
-// tag = 這個活動在「全部裝備」標籤上的代表色
+// ⚠ key 不可改名：使用者的選擇存的是 key
 // ------------------------------------------------------------
 const THEMES = {
-  hiking: {
-    bg: "#10161A", panel: "#1A2420", panelAlt: "#212D27", line: "#324139",
-    amber: "#E3A542", moss: "#7FA88F", onAccent: "#10161A",
-    text: "#EDEDE6", textMuted: "#93A69A", textFaint: "#5D6E64", warn: "#D9634B",
-    tag: "#E3A542",
-  },
-  diving: {
-    bg: "#0A1520", panel: "#10212F", panelAlt: "#15293B", line: "#23415A",
-    amber: "#3DB7E4", moss: "#5BC6C0", onAccent: "#06121C",
-    text: "#E4EFF7", textMuted: "#8DAAC2", textFaint: "#4E6982", warn: "#E26D5C",
-    tag: "#3DB7E4",
-  },
-  skiing: {
-    bg: "#E9EDF1", panel: "#F8FAFB", panelAlt: "#EEF2F5", line: "#D2D9E0",
-    amber: "#3A5A7A", moss: "#6F8CA8", onAccent: "#FFFFFF",
-    text: "#1C2630", textMuted: "#5B6876", textFaint: "#97A3AF", warn: "#C4513A",
-    tag: "#C9D2DB",
-  },
-  camping: {
-    bg: "#16110D", panel: "#211913", panelAlt: "#2A2019", line: "#44362A",
-    amber: "#D99A5B", moss: "#B5A27A", onAccent: "#16110D",
-    text: "#F2EADF", textMuted: "#B39F8A", textFaint: "#6F5E4F", warn: "#E0674D",
-    tag: "#C9894B",
-  },
-  all: {
+  purple: {
     bg: "#131417", panel: "#1C1E23", panelAlt: "#24262D", line: "#363944",
     amber: "#AE9CF5", moss: "#8E96B0", onAccent: "#131417",
     text: "#ECECF1", textMuted: "#9A9EAE", textFaint: "#5F6372", warn: "#E0675A",
-    tag: "#AE9CF5",
+  },
+  green: {
+    bg: "#10161A", panel: "#1A2420", panelAlt: "#212D27", line: "#324139",
+    amber: "#E3A542", moss: "#7FA88F", onAccent: "#10161A",
+    text: "#EDEDE6", textMuted: "#93A69A", textFaint: "#5D6E64", warn: "#D9634B",
+  },
+  khaki: {
+    bg: "#16110D", panel: "#211913", panelAlt: "#2A2019", line: "#44362A",
+    amber: "#D99A5B", moss: "#B5A27A", onAccent: "#16110D",
+    text: "#F2EADF", textMuted: "#B39F8A", textFaint: "#6F5E4F", warn: "#E0674D",
   },
 };
+const THEME_OPTIONS = [
+  { key: "purple", title: "薰衣草紫" },
+  { key: "green", title: "森林綠" },
+  { key: "khaki", title: "卡其咖啡" },
+];
+const DEFAULT_THEME = "green";
 
 // 畫面上用 CSS 變數，切換主題時所有地方自動換色
-const palette = Object.fromEntries(Object.keys(THEMES.hiking).map((k) => [k, `var(--${k})`]));
+const palette = Object.fromEntries(Object.keys(THEMES[DEFAULT_THEME]).map((k) => [k, `var(--${k})`]));
 const themeVars = (key) =>
-  Object.fromEntries(Object.entries(THEMES[key] || THEMES.hiking).map(([k, v]) => [`--${k}`, v]));
+  Object.fromEntries(Object.entries(THEMES[key] || THEMES[DEFAULT_THEME]).map(([k, v]) => [`--${k}`, v]));
 
 const fontStack =
   '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif';
 
 const activityOf = (key) => ACTIVITIES.find((a) => a.key === key) || ACTIVITIES[0];
+// 畫面上顯示的活動（hidden 的暫時不顯示，資料保留）
+const VISIBLE_ACTIVITIES = ACTIVITIES.filter((a) => !a.hidden);
 
 // ------------------------------------------------------------
 // 匯出成 PNG 圖片：純 Canvas 繪製，不依賴外部套件
@@ -152,7 +147,7 @@ const activityOf = (key) => ACTIVITIES.find((a) => a.key === key) || ACTIVITIES[
 // mode: "weight" 顯示總重；"list" 顯示件數
 // ------------------------------------------------------------
 function drawSnapshotToPng({ owner, title, date, sections, total, mode, count, theme }) {
-  const palette = THEMES[theme] || THEMES.hiking;
+  const palette = THEMES[theme] || THEMES[DEFAULT_THEME];
   const width = 760;
   const rowH = 30;
   const lineCount = sections.reduce((n, s) => n + 1 + s.lines.length, 0);
@@ -302,10 +297,19 @@ function loadDraft() {
   }
 }
 
+function loadTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return THEMES[t] ? t : DEFAULT_THEME;
+  } catch (e) {
+    return DEFAULT_THEME;
+  }
+}
+
 function loadView() {
   try {
     const v = localStorage.getItem(VIEW_KEY);
-    return v === ALL || ACTIVITIES.some((a) => a.key === v) ? v : DEFAULT_ACTIVITY;
+    return v === ALL || VISIBLE_ACTIVITIES.some((a) => a.key === v) ? v : DEFAULT_ACTIVITY;
   } catch (e) {
     return DEFAULT_ACTIVITY;
   }
@@ -380,6 +384,8 @@ function GearReckoner() {
   const [newTempName, setNewTempName] = useState("");
   const [newTempWeight, setNewTempWeight] = useState("");
 
+  const [localTheme, setLocalTheme] = useState(loadTheme);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
   const [picker, setPicker] = useState(false); // 「從裝備庫加入」面板
   const [reorderMode, setReorderMode] = useState(false); // 整理模式：拖曳調整順序
@@ -398,14 +404,6 @@ function GearReckoner() {
       // 不影響使用
     }
     setReorderMode(false);
-    // 主題色也掛到最外層 <html>，整頁捲軸才吃得到
-    const root = document.documentElement;
-    Object.entries(themeVars(view)).forEach(([k, v]) => root.style.setProperty(k, v));
-    const bg = (THEMES[view] || THEMES.hiking).bg;
-    document.body.style.background = bg;
-    root.style.background = bg;
-    const metaTheme = document.querySelector('meta[name="theme-color"]');
-    if (metaTheme) metaTheme.setAttribute("content", bg);
   }, [view]);
 
   useEffect(() => store.watchAuth(setUser), []);
@@ -539,6 +537,28 @@ function GearReckoner() {
     : "synced";
   const saveMeta = (changes) => store.put(user, "meta", { ...meta, ...changes, id: "settings" });
 
+  // 佈景主題：帳號設定裡的優先（跨裝置同步），本機記一份讓下次打開不閃色
+  const themeKey = THEMES[meta.theme] ? meta.theme : localTheme;
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_KEY, themeKey);
+    } catch (e) {
+      // 不影響使用
+    }
+    // 主題色也掛到最外層 <html>，整頁捲軸才吃得到
+    const root = document.documentElement;
+    Object.entries(themeVars(themeKey)).forEach(([k, v]) => root.style.setProperty(k, v));
+    const bg = THEMES[themeKey].bg;
+    document.body.style.background = bg;
+    root.style.background = bg;
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute("content", bg);
+  }, [themeKey]);
+  const chooseTheme = (key) => {
+    setLocalTheme(key);
+    saveMeta({ theme: key });
+  };
+
   const gear = useMemo(() => rawGear.map(normalizeGear), [rawGear]);
   const records = useMemo(() => rawRecords.filter((r) => Array.isArray(r.items)).map(normalizeRecord), [rawRecords]);
 
@@ -633,8 +653,11 @@ function GearReckoner() {
     }
   };
 
-  const openNewGear = (extra = {}) =>
-    setEditor({ item: { activities: isLibrary ? [] : [view], ...extra } });
+  // 新增裝備統一在「全部裝備」做；在活動頁按新增會先切到全部裝備
+  const openNewGear = (extra = {}) => {
+    if (!isLibrary) setView(ALL);
+    setEditor({ item: { activities: [], ...extra } });
+  };
 
   const handleSaveGear = (item) => {
     if (item.id) {
@@ -642,7 +665,7 @@ function GearReckoner() {
     } else {
       const created = { ...item, id: newId("g"), createdAt: Date.now() };
       store.put(user, "gear", created);
-      if (!isLibrary && created.activities.includes(view)) setChecked((prev) => ({ ...prev, [created.id]: true }));
+
     }
     setEditor(null);
   };
@@ -695,7 +718,7 @@ function GearReckoner() {
     return true;
   };
 
-  // 拖曳大類別：畫面上第 from 個類別移到第 to 個位置（畫面上沒出現的類別維持原位）
+  // 拖曳類別：畫面上第 from 個類別移到第 to 個位置（畫面上沒出現的類別維持原位）
   const reorderCategories = (from, to) => {
     const visible = gearByCat.map((c) => c.key);
     const [moved] = visible.splice(from, 1);
@@ -777,7 +800,7 @@ function GearReckoner() {
       total: grandTotal,
       mode: activity.mode,
       count: items.length,
-      theme: view,
+      theme: themeKey,
     });
   };
 
@@ -828,7 +851,7 @@ function GearReckoner() {
       total: record.total,
       mode: activityOf(record.activity).mode,
       count: record.items.length,
-      theme: record.activity,
+      theme: themeKey,
     });
 
   const handleDeleteRecord = (record) => {
@@ -888,8 +911,8 @@ function GearReckoner() {
   // ---------- 畫面 ----------
   const panelStyle = {
     background: palette.panel,
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 12,
+    padding: "10px 12px",
     border: `1px solid ${palette.line}`,
   };
   const headingStyle = { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15 };
@@ -907,13 +930,13 @@ function GearReckoner() {
     <div
       className="page"
       style={{
-        ...themeVars(view),
+        ...themeVars(themeKey),
         transition: "background-color 0.25s",
         background: palette.bg,
         color: palette.text,
         fontFamily: "'Inter', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif",
         minHeight: "100vh",
-        padding: "28px 16px",
+        padding: "14px 12px",
       }}
     >
       <style>{`
@@ -928,7 +951,7 @@ function GearReckoner() {
         .sheet::-webkit-scrollbar-track { margin: 14px 0; }
         .item-row {
           display: flex; align-items: center; gap: 10px;
-          padding: 7px 10px; border-radius: 8px;
+          padding: 5px 8px; border-radius: 7px;
           border: 1px solid transparent;
           cursor: pointer; transition: background 0.15s, border-color 0.15s;
         }
@@ -985,8 +1008,8 @@ function GearReckoner() {
         }
         .mini-input:focus { border-color: ${palette.amber}; }
         .record-card {
-          border: 1px solid ${palette.line}; border-radius: 10px;
-          padding: 12px; background: ${palette.panelAlt};
+          border: 1px solid ${palette.line}; border-radius: 9px;
+          padding: 8px 10px; background: ${palette.panelAlt};
         }
         .text-link {
           background: none; border: none; padding: 0; cursor: pointer;
@@ -999,7 +1022,7 @@ function GearReckoner() {
         input[type="number"]::-webkit-inner-spin-button {
           -webkit-appearance: none; margin: 0;
         }
-        .layout-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        .layout-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
         @media (min-width: 900px) {
           .layout-grid { grid-template-columns: 1fr 320px; }
         }
@@ -1041,11 +1064,11 @@ function GearReckoner() {
         }
         .cat-chip.selected { border-color: ${palette.amber}; color: ${palette.amber}; }
         .cat-chip.add { border-style: dashed; }
-        .act-bar { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin: 0 -16px 18px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+        .act-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin: 0 -12px 10px; padding-left: 12px; padding-right: 12px; scrollbar-width: none; }
         .act-bar::-webkit-scrollbar { display: none; }
         .act-tab {
           display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-          padding: 8px 14px; border-radius: 20px; cursor: pointer;
+          padding: 6px 12px; border-radius: 20px; cursor: pointer;
           border: 1.5px solid ${palette.line}; background: ${palette.panel};
           color: ${palette.textMuted}; font-size: 13.5px; font-weight: 600;
         }
@@ -1067,7 +1090,7 @@ function GearReckoner() {
         .act-dot {
           width: 20px; height: 20px; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
-          border: 1.5px solid currentColor; background: ${palette.panelAlt};
+          border: 1px solid ${palette.line}; background: ${palette.panelAlt}; color: ${palette.moss};
         }
         .act-dot.none { border-style: dashed; color: ${palette.textFaint}; font-size: 11px; font-weight: 700; }
         .drag-row {
@@ -1092,7 +1115,7 @@ function GearReckoner() {
 
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {/* Header */}
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 10 }}>
           <div
             style={{
               display: "flex",
@@ -1100,34 +1123,39 @@ function GearReckoner() {
               alignItems: "center",
               gap: 10,
               flexWrap: "wrap",
-              marginBottom: 14,
+              marginBottom: 10,
             }}
           >
             <div style={{ ...monoStyle, fontSize: 12, letterSpacing: "0.12em", color: palette.moss }}>
               {owner} · GEAR RECKONER
             </div>
-            <SyncStatus
-              user={user}
-              syncState={syncState}
-              lastConfirmed={lastConfirmed}
-              onSync={() => syncNow()}
-              onSignIn={handleSignIn}
-              onSignOut={handleSignOut}
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <SyncStatus
+                user={user}
+                syncState={syncState}
+                lastConfirmed={lastConfirmed}
+                onSync={() => syncNow()}
+                onSignIn={handleSignIn}
+                onSignOut={handleSignOut}
+              />
+              <button className="action-btn" style={{ padding: "5px 8px" }} onClick={() => setSettingsOpen(true)} title="設定">
+                <Settings size={14} />
+              </button>
+            </div>
           </div>
 
           {/* 活動切換 */}
           <div className="act-bar">
             <div className={`act-tab ${isLibrary ? "active" : ""}`} onClick={() => setView(ALL)}>
-              <LayoutGrid size={15} style={isLibrary ? undefined : { color: THEMES.all.tag }} /> 全部裝備{" "}
+              <LayoutGrid size={15} /> 全部裝備{" "}
               <span className="count">{gear.length}</span>
             </div>
-            {ACTIVITIES.map((a) => {
+            {VISIBLE_ACTIVITIES.map((a) => {
               const Icon = ICONS[a.icon];
               const n = gear.filter((g) => g.activities.includes(a.key)).length;
               return (
                 <div key={a.key} className={`act-tab ${view === a.key ? "active" : ""}`} onClick={() => setView(a.key)}>
-                  <Icon size={15} style={view === a.key ? undefined : { color: THEMES[a.key].tag }} /> {a.title}{" "}
+                  <Icon size={15} /> {a.title}{" "}
                   <span className="count">{n}</span>
                 </div>
               );
@@ -1137,7 +1165,7 @@ function GearReckoner() {
           <h1
             style={{
               fontFamily: "'Space Grotesk', sans-serif",
-              fontSize: 28,
+              fontSize: 22,
               fontWeight: 700,
               margin: 0,
               letterSpacing: "-0.01em",
@@ -1146,10 +1174,10 @@ function GearReckoner() {
               gap: 10,
             }}
           >
-            <ViewIcon size={26} style={{ color: palette.amber }} />
+            <ViewIcon size={21} style={{ color: palette.amber }} />
             {pageTitle}
           </h1>
-          <p style={{ color: palette.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 }}>{pageHint}</p>
+          <p style={{ color: palette.textMuted, fontSize: 12.5, marginTop: 4, marginBottom: 10 }}>{pageHint}</p>
 
           {!isLibrary && (
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -1176,7 +1204,7 @@ function GearReckoner() {
 
         <div className="layout-grid">
           {/* Left: checklist */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {!dataReady ? (
               <div style={{ ...panelStyle, display: "flex", alignItems: "center", gap: 8, color: palette.textMuted, fontSize: 13 }}>
                 <Loader2 size={14} className="spin" /> 讀取裝備清單中…
@@ -1188,15 +1216,15 @@ function GearReckoner() {
                   {isLibrary ? "裝備庫是空的" : `${activity.title}還沒有裝備`}
                 </div>
                 <p style={{ color: palette.textMuted, fontSize: 13, margin: "8px 0 18px", lineHeight: 1.6 }}>
-                  {notInView.length > 0 ? (
+                  {!isLibrary ? (
                     <>
-                      可以從裝備庫挑已經有的裝備（例如頭燈、外套），
+                      從裝備庫挑要用在{activity.title}的裝備。
                       <br />
-                      或新增{activity.title}專用的裝備。
+                      還沒建的裝備，請到「全部裝備」新增。
                     </>
                   ) : (
                     <>
-                      先選大類別，再填名稱、附註、重量。
+                      先選類別，再填名稱、附註、重量，並勾選用在哪些活動。
                       {(isLibrary || view === DEFAULT_ACTIVITY) && gear.length === 0 && (
                         <>
                           <br />
@@ -1213,7 +1241,7 @@ function GearReckoner() {
                     </button>
                   )}
                   <button className={`action-btn ${notInView.length > 0 ? "" : "primary"}`} onClick={() => openNewGear()}>
-                    <Plus size={14} /> 新增裝備
+                    <Plus size={14} /> {isLibrary ? "新增裝備" : "到全部裝備新增"}
                   </button>
                   {(isLibrary || view === DEFAULT_ACTIVITY) && gear.length === 0 && (
                     <button className="action-btn" onClick={handleLoadSample}>
@@ -1232,19 +1260,26 @@ function GearReckoner() {
             ) : (
               <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="action-btn"
-                    style={{ borderStyle: "dashed", padding: 12, flex: "1 1 120px" }}
-                    onClick={() => openNewGear()}
-                  >
-                    <Plus size={15} /> 新增裝備
-                  </button>
-                  {notInView.length > 0 && (
-                    <button className="action-btn" style={{ padding: 12 }} onClick={() => setPicker(true)}>
+                  {isLibrary ? (
+                    <button
+                      className="action-btn"
+                      style={{ borderStyle: "dashed", padding: 9, flex: "1 1 120px" }}
+                      onClick={() => openNewGear()}
+                    >
+                      <Plus size={15} /> 新增裝備
+                    </button>
+                  ) : (
+                    <button
+                      className="action-btn"
+                      style={{ borderStyle: "dashed", padding: 9, flex: "1 1 120px" }}
+                      onClick={() => setPicker(true)}
+                      disabled={notInView.length === 0}
+                      title={notInView.length === 0 ? "裝備庫的裝備都已經在這個活動了" : undefined}
+                    >
                       <Library size={15} /> 從裝備庫加入
                     </button>
                   )}
-                  <button className="action-btn" style={{ padding: 12 }} onClick={() => setReorderMode(true)}>
+                  <button className="action-btn" style={{ padding: 9 }} onClick={() => setReorderMode(true)}>
                     <ArrowUpDown size={15} /> 排序
                   </button>
                 </div>
@@ -1254,7 +1289,7 @@ function GearReckoner() {
                   const t = catTotals.find((c) => c.key === cat.key);
                   return (
                     <section key={cat.key} style={panelStyle}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <Icon size={16} style={{ color: palette.moss }} />
                           <span style={headingStyle}>{cat.title}</span>
@@ -1269,13 +1304,16 @@ function GearReckoner() {
                                 : formatWeight(t.value)
                               : `${t.count} / ${t.total}`}
                           </span>
-                          <button
-                            className="icon-btn"
-                            title={`在「${cat.title}」新增裝備`}
-                            onClick={() => openNewGear({ category: cat.key })}
-                          >
-                            <Plus size={15} />
-                          </button>
+                          {isLibrary && (
+                            <button
+                              className="icon-btn"
+                              style={{ padding: 4 }}
+                              title={`在「${cat.title}」新增裝備`}
+                              onClick={() => openNewGear({ category: cat.key })}
+                            >
+                              <Plus size={15} />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1328,7 +1366,7 @@ function GearReckoner() {
             {/* 臨時品項 */}
             {!isLibrary && (
               <section style={panelStyle}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Plus size={16} style={{ color: palette.moss }} />
                     <span style={headingStyle}>{TEMP_CATEGORY_TITLE}</span>
@@ -1407,7 +1445,7 @@ function GearReckoner() {
 
             {/* 歷史紀錄 */}
             <section style={panelStyle}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <History size={16} style={{ color: palette.moss }} />
                 <span style={headingStyle}>{isLibrary ? "所有歷史紀錄" : `${activity.title}歷史紀錄`}</span>
               </div>
@@ -1443,7 +1481,7 @@ function GearReckoner() {
                             {ra.mode === "weight" ? `${(r.total / 1000).toFixed(2)} kg` : `${r.items.length} 件`}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                           <button className="action-btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => handleLoadRecord(r)}>
                             <FolderOpen size={12} /> 載入
                           </button>
@@ -1508,11 +1546,11 @@ function GearReckoner() {
           </div>
 
           {/* Right: summary */}
-          <div style={{ position: "sticky", top: 20, alignSelf: "start" }}>
+          <div style={{ position: "sticky", top: 12, alignSelf: "start" }}>
             {isLibrary ? (
               <LibrarySummary gear={gear} panelStyle={panelStyle} />
             ) : isWeightMode ? (
-              <div style={{ ...panelStyle, padding: 20 }}>
+              <div style={{ ...panelStyle, padding: 16 }}>
                 <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
                   目前裝備總重
                 </div>
@@ -1625,7 +1663,7 @@ function GearReckoner() {
                 />
               </div>
             ) : (
-              <div style={{ ...panelStyle, padding: 20 }}>
+              <div style={{ ...panelStyle, padding: 16 }}>
                 <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
                   已準備的裝備
                 </div>
@@ -1687,7 +1725,7 @@ function GearReckoner() {
           </div>
         </div>
 
-        <div style={{ ...monoStyle, textAlign: "center", fontSize: 11, color: palette.textFaint, marginTop: 28 }}>
+        <div style={{ ...monoStyle, textAlign: "center", fontSize: 11, color: palette.textFaint, marginTop: 16 }}>
           Gear Reckoner v{APP_VERSION}
         </div>
       </div>
@@ -1725,15 +1763,18 @@ function GearReckoner() {
             </span>
           </>
         )}
-        {dataReady && (
-          <button
-            className="action-btn primary"
-            style={{ marginLeft: "auto", padding: "7px 12px" }}
-            onClick={() => openNewGear()}
-          >
-            <Plus size={14} /> 裝備
-          </button>
-        )}
+        {dataReady &&
+          (isLibrary ? (
+            <button className="action-btn primary" style={{ marginLeft: "auto", padding: "7px 12px" }} onClick={() => openNewGear()}>
+              <Plus size={14} /> 裝備
+            </button>
+          ) : (
+            notInView.length > 0 && (
+              <button className="action-btn primary" style={{ marginLeft: "auto", padding: "7px 12px" }} onClick={() => setPicker(true)}>
+                <Library size={14} /> 加入
+              </button>
+            )
+          ))}
       </div>
 
       {editor && (
@@ -1748,6 +1789,8 @@ function GearReckoner() {
         />
       )}
 
+      {settingsOpen && <SettingsSheet themeKey={themeKey} onChooseTheme={chooseTheme} onClose={() => setSettingsOpen(false)} />}
+
       {picker && (
         <LibraryPicker
           activity={activity}
@@ -1761,9 +1804,62 @@ function GearReckoner() {
   );
 }
 
-// 「全部裝備」每件裝備右邊的活動小圓點（顏色 = 該活動的代表色）
+// ------------------------------------------------------------
+// 設定：佈景主題
+// ------------------------------------------------------------
+function SettingsSheet({ themeKey, onChooseTheme, onClose }) {
+  useEscape(onClose);
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17 }}>設定</span>
+          <button className="icon-btn" onClick={onClose} title="關閉">
+            <X size={18} />
+          </button>
+        </div>
+        <span className="field-label">佈景主題</span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {THEME_OPTIONS.map((t) => {
+            const c = THEMES[t.key];
+            const on = t.key === themeKey;
+            return (
+              <div
+                key={t.key}
+                onClick={() => onChooseTheme(t.key)}
+                style={{
+                  cursor: "pointer",
+                  borderRadius: 12,
+                  padding: 10,
+                  background: c.bg,
+                  border: `2px solid ${on ? c.amber : c.line}`,
+                  color: c.text,
+                }}
+              >
+                <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                  {[c.panel, c.amber, c.moss].map((col, i) => (
+                    <span key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: col, border: `1px solid ${c.line}` }} />
+                  ))}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                  {on && <Check size={13} style={{ color: c.amber }} />}
+                  {t.title}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 10, marginBottom: 0 }}>
+          選擇會存在帳號裡，手機和電腦會用同一個主題。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// 「全部裝備」每件裝備右邊的活動小圓點
 function ActivityDots({ activities }) {
-  if (activities.length === 0) {
+  if (!VISIBLE_ACTIVITIES.some((a) => activities.includes(a.key))) {
     return (
       <div className="act-dots" title="還沒指定活動">
         <span className="act-dot none">?</span>
@@ -1771,11 +1867,11 @@ function ActivityDots({ activities }) {
     );
   }
   return (
-    <div className="act-dots" title={ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => a.title).join("、")}>
-      {ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => {
+    <div className="act-dots" title={VISIBLE_ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => a.title).join("、")}>
+      {VISIBLE_ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => {
         const Icon = ICONS[a.icon];
         return (
-          <span key={a.key} className="act-dot" style={{ color: THEMES[a.key].tag }}>
+          <span key={a.key} className="act-dot">
             <Icon size={11} />
           </span>
         );
@@ -1805,9 +1901,9 @@ function Breakdown({ rows }) {
 
 // 「全部裝備」右側：每個活動有幾件
 function LibrarySummary({ gear, panelStyle }) {
-  const untagged = gear.filter((g) => g.activities.length === 0).length;
+  const untagged = gear.filter((g) => !VISIBLE_ACTIVITIES.some((a) => g.activities.includes(a.key))).length;
   return (
-    <div style={{ ...panelStyle, padding: 20 }}>
+    <div style={{ ...panelStyle, padding: 16 }}>
       <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>裝備庫</div>
       <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 38, fontWeight: 700, lineHeight: 1.1, color: palette.amber }}>
         {gear.length}
@@ -1815,9 +1911,9 @@ function LibrarySummary({ gear, panelStyle }) {
       </div>
       <Breakdown
         rows={[
-          ...ACTIVITIES.map((a) => {
+          ...VISIBLE_ACTIVITIES.map((a) => {
             const n = gear.filter((g) => g.activities.includes(a.key)).length;
-            return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0, color: THEMES[a.key].tag };
+            return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0 };
           }),
           ...(untagged ? [{ key: "none", label: "未分活動", text: `${untagged} 件`, ratio: untagged / gear.length }] : []),
         ]}
@@ -1906,7 +2002,7 @@ function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
             排裝備
           </button>
           <button className={`tab-btn ${tab === "categories" ? "active" : ""}`} onClick={() => setTab("categories")}>
-            排大類別
+            排類別
           </button>
           <button className="action-btn primary" style={{ marginLeft: "auto" }} onClick={onDone}>
             <Check size={14} /> 完成
@@ -1998,10 +2094,6 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
   useEscape(onClose);
 
   const weightMatters = acts.some((a) => activityOf(a).mode === "weight");
-  // 只顯示跟選到的活動有關的類別（共用類別、自訂類別、目前已選的類別一定會顯示）
-  const shownCategories = categories.filter(
-    (c) => c.key === category || !c.activities || acts.length === 0 || c.activities.some((a) => acts.includes(a))
-  );
   const selectedCat = categories.find((c) => c.key === category);
 
   const toggleAct = (key) => setActs((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -2035,7 +2127,7 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
 
         <span className="field-label">用在哪些活動（可複選）</span>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {ACTIVITIES.map((a) => {
+          {VISIBLE_ACTIVITIES.map((a) => {
             const Icon = ICONS[a.icon];
             return (
               <span key={a.key} className={`act-chip ${acts.includes(a.key) ? "selected" : ""}`} onClick={() => toggleAct(a.key)}>
@@ -2045,9 +2137,9 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
           })}
         </div>
 
-        <span className="field-label">大類別</span>
+        <span className="field-label">類別</span>
         <div className="cat-grid">
-          {shownCategories.map((c) => {
+          {categories.map((c) => {
             const Icon = ICONS[c.icon] || Tag;
             return (
               <div
