@@ -69,7 +69,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.3.0";
+const APP_VERSION = "3.4.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -391,7 +391,6 @@ function GearReckoner() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState(null); // null 或 { item }（item.id 不存在代表新增）
   const [picker, setPicker] = useState(false); // 「從裝備庫加入」面板
-  const [reorderMode, setReorderMode] = useState(false); // 整理模式：拖曳調整順序
   const [saving, setSaving] = useState(false);
   const importInput = useRef(null);
   const upgradedIds = useRef(new Set());
@@ -406,7 +405,6 @@ function GearReckoner() {
     } catch (e) {
       // 不影響使用
     }
-    setReorderMode(false);
   }, [view]);
 
   useEffect(() => store.watchAuth(setUser), []);
@@ -723,17 +721,15 @@ function GearReckoner() {
     return true;
   };
 
-  // 拖曳類別：畫面上第 from 個類別移到第 to 個位置（畫面上沒出現的類別維持原位）
+  // 拖曳類別（在設定裡）：第 from 個類別移到第 to 個位置
   const reorderCategories = (from, to) => {
-    const visible = gearByCat.map((c) => c.key);
-    const [moved] = visible.splice(from, 1);
-    visible.splice(to, 0, moved);
-    const visibleSet = new Set(visible);
-    let k = 0;
-    saveMeta({ categoryOrder: categories.map((c) => (visibleSet.has(c.key) ? visible[k++] : c.key)) });
+    const keys = categories.map((c) => c.key);
+    const [moved] = keys.splice(from, 1);
+    keys.splice(to, 0, moved);
+    saveMeta({ categoryOrder: keys });
   };
 
-  // 拖曳裝備：在同一類別裡移動，並把整個類別重新編號
+  // 長按拖曳裝備：在同一類別裡移動，並把整個類別重新編號
   const reorderGear = (cat, from, to) => {
     const items = [...cat.items];
     const [moved] = items.splice(from, 1);
@@ -926,10 +922,10 @@ function GearReckoner() {
 
   const pageTitle = isLibrary ? "全部裝備" : `${activity.title}${isWeightMode ? "裝備重量試算" : "裝備清單"}`;
   const pageHint = isLibrary
-    ? "你擁有的所有裝備都在這裡。每件裝備可以貼上多個活動標籤，例如頭燈同時用在登山和露營。"
+    ? "你擁有的所有裝備都在這裡，每件可以貼上多個活動標籤。點 ✎ 修改，長按可拖曳排序。"
     : isWeightMode
-    ? "勾選這次要帶的裝備，即時算出總重。點 ✎ 可修改或刪除裝備。"
-    : "勾選這次要帶的裝備，出門前確認沒有漏帶。點 ✎ 可修改或刪除裝備。";
+    ? "勾選這次要帶的裝備，即時算出總重。點 ✎ 修改，長按可拖曳排序。"
+    : "勾選這次要帶的裝備，出門前確認沒有漏帶。點 ✎ 修改，長按可拖曳排序。";
 
   return (
     <div
@@ -961,6 +957,8 @@ function GearReckoner() {
           cursor: pointer; transition: background 0.15s, border-color 0.15s;
         }
         .item-row:hover { background: ${palette.panelAlt}; }
+        .item-row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+        .item-row.drag-chosen { border-color: ${palette.amber}; background: ${palette.panelAlt}; }
         .item-row.on { border-color: ${palette.line}; }
         .item-row.static { cursor: default; }
         .checkbox {
@@ -1099,8 +1097,8 @@ function GearReckoner() {
         }
         .act-dot.none { border-style: dashed; color: ${palette.textFaint}; font-size: 11px; font-weight: 700; }
         .drag-row {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px; border-radius: 8px;
+          display: flex; align-items: center; gap: 8px;
+          padding: 6px 8px; border-radius: 7px;
           border: 1px solid ${palette.line}; background: ${palette.panelAlt};
         }
         .drag-handle {
@@ -1255,13 +1253,6 @@ function GearReckoner() {
                   )}
                 </div>
               </section>
-            ) : reorderMode ? (
-              <ReorderView
-                gearByCat={gearByCat}
-                onCategoryReorder={reorderCategories}
-                onGearReorder={reorderGear}
-                onDone={() => setReorderMode(false)}
-              />
             ) : (
               <>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1284,9 +1275,6 @@ function GearReckoner() {
                       <Library size={15} /> 從裝備庫加入
                     </button>
                   )}
-                  <button className="action-btn" style={{ padding: 9 }} onClick={() => setReorderMode(true)}>
-                    <ArrowUpDown size={15} /> 排序
-                  </button>
                 </div>
 
                 {gearByCat.map((cat) => {
@@ -1322,12 +1310,16 @@ function GearReckoner() {
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <SortableList
+                        longPress
+                        onMove={(from, to) => reorderGear(cat, from, to)}
+                        style={{ display: "flex", flexDirection: "column", gap: 2 }}
+                      >
                         {cat.items.map((it) => (
                           <div
                             key={it.id}
                             className={`item-row ${isLibrary ? "static" : checked[it.id] ? "on" : ""}`}
-                            onClick={() => (isLibrary ? setEditor({ item: it }) : toggle(it.id))}
+                            onClick={() => !isLibrary && !justDragged() && toggle(it.id)}
                           >
                             {!isLibrary && <CheckBox on={checked[it.id]} />}
                             <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
@@ -1361,7 +1353,7 @@ function GearReckoner() {
                             </button>
                           </div>
                         ))}
-                      </div>
+                      </SortableList>
                     </section>
                   );
                 })}
@@ -1794,7 +1786,16 @@ function GearReckoner() {
         />
       )}
 
-      {settingsOpen && <SettingsSheet themeKey={themeKey} onChooseTheme={chooseTheme} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsSheet
+          themeKey={themeKey}
+          onChooseTheme={chooseTheme}
+          categories={categories}
+          gear={gear}
+          onCategoryReorder={reorderCategories}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {picker && (
         <LibraryPicker
@@ -1812,7 +1813,7 @@ function GearReckoner() {
 // ------------------------------------------------------------
 // 設定：佈景主題
 // ------------------------------------------------------------
-function SettingsSheet({ themeKey, onChooseTheme, onClose }) {
+function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryReorder, onClose }) {
   useEscape(onClose);
   return (
     <div className="sheet-backdrop" onClick={onClose}>
@@ -1854,9 +1855,30 @@ function SettingsSheet({ themeKey, onChooseTheme, onClose }) {
             );
           })}
         </div>
-        <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 10, marginBottom: 0 }}>
+        <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 8, marginBottom: 0 }}>
           選擇會存在帳號裡，手機和電腦會用同一個主題。
         </p>
+
+        <span className="field-label">類別排序</span>
+        <p style={{ fontSize: 12, color: palette.textFaint, margin: "0 0 6px" }}>
+          按住左邊的 <GripVertical size={11} style={{ verticalAlign: -1 }} /> 拖到想要的位置，所有活動共用這個順序。
+        </p>
+        <SortableList onMove={onCategoryReorder} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {categories.map((cat) => {
+            const Icon = ICONS[cat.icon] || Tag;
+            const n = gear.filter((g) => g.category === cat.key).length;
+            return (
+              <div key={cat.key} className="drag-row">
+                <DragHandle />
+                <Icon size={15} style={{ color: palette.moss }} />
+                <span style={{ flex: 1, fontWeight: 600, fontSize: 13.5 }}>{cat.title}</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: palette.textFaint }}>
+                  {n} 件
+                </span>
+              </div>
+            );
+          })}
+        </SortableList>
       </div>
     </div>
   );
@@ -1934,8 +1956,14 @@ function LibrarySummary({ gear, panelStyle }) {
 // 瀏覽器可能還拿著舊的 index.html，這樣才不會因此載入失敗
 // ------------------------------------------------------------
 const SORTABLE_URL = "https://esm.sh/sortablejs@1.15.6";
+const LONG_PRESS_MS = 300;
 
-function SortableList({ onMove, style, children }) {
+// 長按觸發拖曳後放開時，瀏覽器還會送一次「點擊」→ 用這個時間戳記把它擋掉，避免誤勾選
+let lastDragAt = 0;
+const justDragged = () => Date.now() - lastDragAt < 400;
+
+// longPress：長按整行拖曳（手指一碰就滑動 = 捲動畫面，不會誤拖）；否則按住 ⠿ 把手拖曳
+function SortableList({ onMove, style, children, longPress = false }) {
   const ref = useRef(null);
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
@@ -1945,11 +1973,25 @@ function SortableList({ onMove, style, children }) {
     import(SORTABLE_URL).then(({ default: Sortable }) => {
       if (cancelled) return;
       sortable = Sortable.create(ref.current, {
-        handle: ".drag-handle",
+        ...(longPress
+          ? {
+              delay: LONG_PRESS_MS,
+              delayOnTouchOnly: false,
+              touchStartThreshold: 6,
+              filter: ".icon-btn", // 按 ✎ 不會開始拖曳
+              preventOnFilter: false,
+            }
+          : { handle: ".drag-handle" }),
         animation: 150,
         forceFallback: true, // 電腦和手機用同一套拖曳方式
         ghostClass: "drag-ghost",
         chosenClass: "drag-chosen",
+        onChoose: () => {
+          if (longPress && navigator.vibrate) navigator.vibrate(10); // Android 輕震提示「可以拖了」
+        },
+        onUnchoose: () => {
+          lastDragAt = Date.now();
+        },
         onEnd: ({ item, from, oldIndex, newIndex }) => {
           if (oldIndex === newIndex) return;
           from.removeChild(item);
@@ -1975,93 +2017,6 @@ function DragHandle() {
     <span className="drag-handle" title="按住拖曳">
       <GripVertical size={16} />
     </span>
-  );
-}
-
-function ReorderView({ gearByCat, onCategoryReorder, onGearReorder, onDone }) {
-  const [tab, setTab] = useState("gear");
-  const panel = {
-    background: palette.panel,
-    borderRadius: 14,
-    padding: 16,
-    border: `1px solid ${palette.line}`,
-  };
-  const listStyle = { display: "flex", flexDirection: "column", gap: 6 };
-  const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: palette.textMuted };
-
-  return (
-    <>
-      <div
-        style={{
-          ...panel,
-          padding: "10px 12px",
-          borderColor: palette.amber,
-          position: "sticky",
-          top: 8,
-          zIndex: 5,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <ArrowUpDown size={16} style={{ color: palette.amber }} />
-          <button className={`tab-btn ${tab === "gear" ? "active" : ""}`} onClick={() => setTab("gear")}>
-            排裝備
-          </button>
-          <button className={`tab-btn ${tab === "categories" ? "active" : ""}`} onClick={() => setTab("categories")}>
-            排類別
-          </button>
-          <button className="action-btn primary" style={{ marginLeft: "auto" }} onClick={onDone}>
-            <Check size={14} /> 完成
-          </button>
-        </div>
-        <div style={{ fontSize: 12, color: palette.textMuted, marginTop: 6 }}>
-          按住左邊的 <GripVertical size={12} style={{ verticalAlign: -2 }} /> 拖到想要的位置
-        </div>
-      </div>
-
-      {tab === "categories" ? (
-        <section style={panel}>
-          <SortableList onMove={onCategoryReorder} style={listStyle}>
-            {gearByCat.map((cat) => {
-              const Icon = ICONS[cat.icon] || Tag;
-              return (
-                <div key={cat.key} className="drag-row">
-                  <DragHandle />
-                  <Icon size={16} style={{ color: palette.moss }} />
-                  <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.title}</span>
-                  <span style={mono}>{cat.items.length} 件</span>
-                </div>
-              );
-            })}
-          </SortableList>
-        </section>
-      ) : (
-        gearByCat.map((cat) => {
-          const Icon = ICONS[cat.icon] || Tag;
-          return (
-            <section key={cat.key} style={panel}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <Icon size={16} style={{ color: palette.moss }} />
-                <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15 }}>
-                  {cat.title}
-                </span>
-              </div>
-              <SortableList onMove={(from, to) => onGearReorder(cat, from, to)} style={listStyle}>
-                {cat.items.map((it) => (
-                  <div key={it.id} className="drag-row">
-                    <DragHandle />
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>
-                      {it.name}
-                      {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
-                    </div>
-                    {hasWeight(it.weight) && <span style={mono}>{formatWeight(it.weight)}</span>}
-                  </div>
-                ))}
-              </SortableList>
-            </section>
-          );
-        })
-      )}
-    </>
   );
 }
 
