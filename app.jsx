@@ -60,6 +60,7 @@ import {
   PartyPopper,
   RotateCcw,
   ArrowUp,
+  Eye,
 } from "lucide-react";
 import {
   ACTIVITIES,
@@ -76,7 +77,7 @@ import {
 import * as store from "./storage.js";
 
 // 版本號：每次更新記得同步修改 sw.js 的 CACHE_VERSION 與 CHANGELOG.md
-const APP_VERSION = "3.7.3";
+const APP_VERSION = "3.8.0";
 // 備份檔格式版本：備份檔結構有變才加 1，並在 normalizeBackup 處理舊格式
 // 3：裝備多了 activities、紀錄多了 activity（舊備份讀進來會自動補成登山）
 const BACKUP_SCHEMA = 3;
@@ -149,15 +150,16 @@ const fontStack =
   '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif';
 
 const activityOf = (key) => ACTIVITIES.find((a) => a.key === key) || ACTIVITIES[0];
-// 畫面上顯示的活動（hidden 的暫時不顯示，資料保留）
-const VISIBLE_ACTIVITIES = ACTIVITIES.filter((a) => !a.hidden);
+// 畫面上要顯示哪些活動：設定裡的開關（meta.settings.activityVisibility）優先，沒設定過就看預設的 hidden
+const visibleActivitiesFrom = (visibility = {}) =>
+  ACTIVITIES.filter((a) => (visibility[a.key] !== undefined ? visibility[a.key] : !a.hidden));
 
 // ------------------------------------------------------------
 // 匯出成 PNG 圖片：純 Canvas 繪製，不依賴外部套件
 // sections: [{ title, lines: [{ name, weight }] }]
 // mode: "weight" 顯示總重；"list" 顯示件數
 // ------------------------------------------------------------
-function drawSnapshotToPng({ owner, title, date, sections, total, mode, count, theme }) {
+function drawSnapshotToPng({ owner, title, date, sections, total, wornTotal = 0, mode, count, theme }) {
   const palette = THEMES[theme] || THEMES[DEFAULT_THEME];
   const width = 760;
   const rowH = 30;
@@ -229,14 +231,21 @@ function drawSnapshotToPng({ owner, title, date, sections, total, mode, count, t
 
   ctx.fillStyle = palette.textMuted;
   ctx.font = `500 13px ${fontStack}`;
-  ctx.fillText(mode === "list" ? "裝備件數" : "總重量", 32, y);
+  ctx.fillText(mode === "list" ? "裝備件數" : wornTotal > 0 ? "背包重量" : "總重量", 32, y);
   y += 40;
   ctx.fillStyle = palette.amber;
   ctx.font = `700 40px ${fontStack}`;
   ctx.fillText(mode === "list" ? `${count} 件` : `${(total / 1000).toFixed(2)} kg`, 32, y);
   ctx.fillStyle = palette.textMuted;
   ctx.font = `500 14px ${fontStack}`;
-  if (mode !== "list") ctx.fillText(`${total.toLocaleString()} g`, 32, y + 22);
+  if (mode !== "list")
+    ctx.fillText(
+      wornTotal > 0
+        ? `身上穿戴 ${(wornTotal / 1000).toFixed(2)} kg · 總重 ${((total + wornTotal) / 1000).toFixed(2)} kg`
+        : `${total.toLocaleString()} g`,
+      32,
+      y + 22
+    );
   else if (total > 0) ctx.fillText(`參考重量 ${(total / 1000).toFixed(2)} kg`, 32, y + 22);
 
   ctx.fillStyle = palette.textFaint;
@@ -252,7 +261,8 @@ function itemsToSections(items) {
   items.forEach((it) => {
     let sec = sections.find((s) => s.title === it.cat);
     if (!sec) sections.push((sec = { title: it.cat, lines: [] }));
-    sec.lines.push({ name: it.note ? `${it.name} · ${it.note}` : it.name, weight: it.weight });
+    const name = it.note ? `${it.name} · ${it.note}` : it.name;
+    sec.lines.push({ name: it.worn ? `${name}（穿著）` : name, weight: it.weight });
   });
   return sections;
 }
@@ -320,7 +330,7 @@ function loadTheme() {
 function loadView() {
   try {
     const v = localStorage.getItem(VIEW_KEY);
-    return v === ALL || VISIBLE_ACTIVITIES.some((a) => a.key === v) ? v : DEFAULT_ACTIVITY;
+    return v === ALL || ACTIVITIES.some((a) => a.key === v) ? v : DEFAULT_ACTIVITY;
   } catch (e) {
     return DEFAULT_ACTIVITY;
   }
@@ -354,7 +364,8 @@ function normalizeBackup(data) {
 }
 
 // packed：打包模式裡已經裝進包包的裝備 id；packing：目前是否在打包畫面（關掉 App 再打開會回到這裡）
-const EMPTY_DRAFT = { checked: {}, title: "", tempItems: [], packed: {}, packing: false };
+// worn：這一趟「穿在身上」的覆寫（{id:true/false}）；沒覆寫就用裝備本身的「預設穿在身上」
+const EMPTY_DRAFT = { checked: {}, title: "", tempItems: [], packed: {}, packing: false, worn: {} };
 
 function GearReckoner() {
   const [initialDraft] = useState(loadDraft);
@@ -396,6 +407,11 @@ function GearReckoner() {
   const packing = !isLibrary && !!cur.packing;
   const setPacked = (u) => updateDraft("packed", u);
   const setPacking = (v) => updateDraft("packing", v);
+  const wornMap = cur.worn || {};
+  // 重量模式才分「背包 / 身上」；清單模式不管穿不穿
+  const isWorn = (g) => isWeightMode && (wornMap[g.id] !== undefined ? !!wornMap[g.id] : !!g.worn);
+  const toggleWorn = (g) => updateDraft("worn", (prev) => ({ ...prev, [g.id]: !isWorn(g) }));
+  const toggleTempWorn = (id) => setTempItems((prev) => prev.map((t) => (t.id === id ? { ...t, worn: !t.worn } : t)));
 
   const [newTempName, setNewTempName] = useState("");
   const [newTempWeight, setNewTempWeight] = useState("");
@@ -598,6 +614,15 @@ function GearReckoner() {
     saveMeta({ theme: key });
   };
 
+  const visibleActs = useMemo(() => visibleActivitiesFrom(meta.activityVisibility), [meta.activityVisibility]);
+  useEffect(() => {
+    if (loaded.meta && !isLibrary && !visibleActs.some((a) => a.key === view)) setView(ALL);
+  }, [visibleActs, view, isLibrary, loaded.meta]);
+  const toggleActivityVisible = (key) => {
+    const now = visibleActs.some((a) => a.key === key);
+    saveMeta({ activityVisibility: { ...(meta.activityVisibility || {}), [key]: !now } });
+  };
+
   const gear = useMemo(() => rawGear.map(normalizeGear), [rawGear]);
   const records = useMemo(() => rawRecords.filter((r) => Array.isArray(r.items)).map(normalizeRecord), [rawRecords]);
 
@@ -646,16 +671,27 @@ function GearReckoner() {
   );
 
   const weightOf = (w) => (hasWeight(w) ? w : 0);
+  // value = 算進背包的重量；worn = 穿在身上的重量
   const catTotals = gearByCat.map((cat) => ({
     key: cat.key,
     label: cat.title,
-    value: cat.items.reduce((sum, g) => sum + (checked[g.id] ? weightOf(g.weight) : 0), 0),
+    value: cat.items.reduce((sum, g) => sum + (checked[g.id] && !isWorn(g) ? weightOf(g.weight) : 0), 0),
+    worn: cat.items.reduce((sum, g) => sum + (checked[g.id] && isWorn(g) ? weightOf(g.weight) : 0), 0),
     count: cat.items.filter((g) => checked[g.id]).length,
     total: cat.items.length,
   }));
   const tempChecked = tempItems.filter((t) => t.checked);
-  const tempTotal = tempChecked.reduce((sum, it) => sum + weightOf(it.weight), 0);
+  const tempWornOn = (t) => isWeightMode && !!t.worn;
+  const tempTotal = tempChecked.reduce((sum, it) => sum + (tempWornOn(it) ? 0 : weightOf(it.weight)), 0);
+  // grandTotal = 背包重量（不含穿在身上的），用來跟目標比
   const grandTotal = Math.round((catTotals.reduce((s, c) => s + c.value, 0) + tempTotal) * 10) / 10;
+  const wornTotal =
+    Math.round(
+      (catTotals.reduce((s, c) => s + c.worn, 0) +
+        tempChecked.reduce((sum, it) => sum + (tempWornOn(it) ? weightOf(it.weight) : 0), 0)) *
+        10
+    ) / 10;
+  const allTotal = Math.round((grandTotal + wornTotal) * 10) / 10;
   const checkedCount = catTotals.reduce((s, c) => s + c.count, 0) + tempChecked.length;
   const itemCount = viewGear.length + tempItems.length;
 
@@ -822,9 +858,23 @@ function GearReckoner() {
     ...gearByCat.flatMap((cat) =>
       cat.items
         .filter((g) => checked[g.id])
-        .map((g) => ({ id: g.id, cat: cat.title, name: g.name, note: g.note || "", weight: hasWeight(g.weight) ? g.weight : null }))
+        .map((g) => ({
+          id: g.id,
+          cat: cat.title,
+          name: g.name,
+          note: g.note || "",
+          weight: hasWeight(g.weight) ? g.weight : null,
+          ...(isWorn(g) ? { worn: true } : {}),
+        }))
     ),
-    ...tempChecked.map((t) => ({ id: t.id, cat: TEMP_CATEGORY_TITLE, name: t.name, note: "", weight: hasWeight(t.weight) ? t.weight : null })),
+    ...tempChecked.map((t) => ({
+      id: t.id,
+      cat: TEMP_CATEGORY_TITLE,
+      name: t.name,
+      note: "",
+      weight: hasWeight(t.weight) ? t.weight : null,
+      ...(tempWornOn(t) ? { worn: true } : {}),
+    })),
   ];
 
   const defaultTitle = () => `${activity.title}裝備紀錄`;
@@ -837,6 +887,7 @@ function GearReckoner() {
       date: formatDate(new Date().toISOString()),
       sections: itemsToSections(items),
       total: grandTotal,
+      wornTotal,
       mode: activity.mode,
       count: items.length,
       theme: themeKey,
@@ -852,7 +903,8 @@ function GearReckoner() {
         title: title.trim() || defaultTitle(),
         date: new Date().toISOString(),
         items: currentItems(),
-        total: grandTotal,
+        total: grandTotal, // 重量模式：背包重量（不含穿在身上的）
+        ...(isWeightMode ? { wornTotal, wornTracked: true } : {}),
       });
       // 存好紀錄 = 這趟出門準備完成 → 清掉打包進度，下次重新開始
       setDrafts((prev) => ({ ...prev, [view]: { ...EMPTY_DRAFT, ...prev[view], packed: {}, packing: false } }));
@@ -875,10 +927,20 @@ function GearReckoner() {
       [act]: {
         title: record.title,
         checked: Object.fromEntries(actGear.map((g) => [g.id, inRecord.has(g.id)])),
+        // 有記錄穿著狀態的紀錄（v3.8 以後）→ 照當時的穿著還原；舊紀錄就用裝備的預設
+        worn: record.wornTracked
+          ? Object.fromEntries(record.items.filter((i) => actIds.has(i.id)).map((i) => [i.id, !!i.worn]))
+          : {},
         // 紀錄裡有、但目前這個活動已經沒有的裝備 → 放到臨時品項
         tempItems: record.items
           .filter((i) => !actIds.has(i.id))
-          .map((i) => ({ id: i.id, name: i.note ? `${i.name} · ${i.note}` : i.name, weight: i.weight, checked: true })),
+          .map((i) => ({
+            id: i.id,
+            name: i.note ? `${i.name} · ${i.note}` : i.name,
+            weight: i.weight,
+            checked: true,
+            ...(i.worn ? { worn: true } : {}),
+          })),
       },
     }));
     setView(act);
@@ -892,6 +954,7 @@ function GearReckoner() {
       date: formatDate(record.date),
       sections: itemsToSections(record.items),
       total: record.total,
+      wornTotal: record.wornTotal || 0,
       mode: activityOf(record.activity).mode,
       count: record.items.length,
       theme: themeKey,
@@ -915,6 +978,7 @@ function GearReckoner() {
         customCategories: meta.customCategories || [],
         categoryOrder: meta.categoryOrder || null,
         targetG: meta.targetG || null,
+        activityVisibility: meta.activityVisibility || null,
       },
     };
     const d = new Date();
@@ -944,6 +1008,7 @@ function GearReckoner() {
         customCategories: cats,
         categoryOrder: data.settings.categoryOrder || meta.categoryOrder || null,
         targetG: data.settings.targetG || meta.targetG || null,
+        activityVisibility: data.settings.activityVisibility || meta.activityVisibility || null,
       });
       alert("匯入完成！");
     } catch (err) {
@@ -962,11 +1027,11 @@ function GearReckoner() {
   const monoStyle = { fontFamily: "'JetBrains Mono', monospace" };
   const ViewIcon = isLibrary ? LayoutGrid : ICONS[activity.icon];
 
-  const pageTitle = isLibrary ? "全部裝備" : `${activity.title}${isWeightMode ? "裝備重量試算" : "裝備清單"}`;
+  const pageTitle = isLibrary ? "全部裝備" : `${activity.title}裝備清單`;
   const pageHint = isLibrary
     ? "你擁有的所有裝備都在這裡，每件可以貼上多個活動標籤。點 ✎ 修改，長按可拖曳排序。"
     : isWeightMode
-    ? "勾選這次要帶的裝備，即時算出總重。點 ✎ 修改，長按可拖曳排序。"
+    ? "勾選這次要帶的裝備，即時算出背包重量；點 👕 標記穿在身上（不算進背包）。點 ✎ 修改，長按可拖曳排序。"
     : "勾選這次要帶的裝備，出門前確認沒有漏帶。點 ✎ 修改，長按可拖曳排序。";
 
   return (
@@ -1237,6 +1302,23 @@ function GearReckoner() {
           animation: pop 0.35s ease-out;
         }
         @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .worn-btn { padding: 4px; }
+        .worn-btn.on { color: ${palette.amber}; background: ${palette.panelAlt}; }
+        .worn-tag {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+          border: 1px solid ${palette.line}; color: ${palette.amber};
+        }
+        .switch {
+          width: 38px; height: 22px; border-radius: 11px; flex-shrink: 0; position: relative;
+          background: ${palette.line}; transition: background 0.2s;
+        }
+        .switch.on { background: ${palette.amber}; }
+        .switch-knob {
+          position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+          background: ${palette.text}; transition: transform 0.2s;
+        }
+        .switch.on .switch-knob { transform: translateX(16px); background: ${palette.onAccent}; }
         .menu-row {
           display: flex; align-items: center; gap: 10px; cursor: pointer;
           padding: 11px 10px; border-radius: 9px;
@@ -1282,7 +1364,7 @@ function GearReckoner() {
               <LayoutGrid size={15} /> 全部裝備{" "}
               <span className="count">{gear.length}</span>
             </div>
-            {VISIBLE_ACTIVITIES.map((a) => {
+            {visibleActs.map((a) => {
               const Icon = ICONS[a.icon];
               const n = gear.filter((g) => g.activities.includes(a.key)).length;
               return (
@@ -1437,9 +1519,7 @@ function GearReckoner() {
                             {isLibrary
                               ? `${cat.items.length} 件`
                               : isWeightMode
-                              ? formatWeight(t.value) === "—"
-                                ? "0 g"
-                                : formatWeight(t.value)
+                              ? `${formatWeight(t.value) === "—" ? "0 g" : formatWeight(t.value)}${t.worn > 0 ? ` ＋👕${formatWeight(t.worn)}` : ""}`
                               : `${t.count} / ${t.total}`}
                           </span>
                           {isLibrary && (
@@ -1476,7 +1556,24 @@ function GearReckoner() {
                               {it.name}
                               {it.note && <span style={{ color: palette.textFaint }}> · {it.note}</span>}
                             </div>
-                            {isLibrary && <ActivityDots activities={it.activities} />}
+                            {isLibrary && <ActivityDots activities={it.activities} visible={visibleActs} />}
+                            {isLibrary && it.worn && (
+                              <span className="worn-tag" title="預設穿在身上">
+                                <Shirt size={11} />
+                              </span>
+                            )}
+                            {isWeightMode && (
+                              <button
+                                className={`icon-btn worn-btn ${isWorn(it) ? "on" : ""}`}
+                                title={isWorn(it) ? "穿在身上（不算進背包重量），點一下改回放進背包" : "點一下標記為穿在身上（不算進背包重量）"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleWorn(it);
+                                }}
+                              >
+                                <Shirt size={13} />
+                              </button>
+                            )}
                             {(isWeightMode || isLibrary || hasWeight(it.weight)) && (
                               <div
                                 style={{
@@ -1485,7 +1582,7 @@ function GearReckoner() {
                                   fontWeight: 600,
                                   minWidth: 50,
                                   textAlign: "right",
-                                  color: isWeightMode && checked[it.id] ? palette.text : palette.textFaint,
+                                  color: isWeightMode && checked[it.id] && !isWorn(it) ? palette.text : palette.textFaint,
                                 }}
                               >
                                 {formatWeight(it.weight)}
@@ -1539,6 +1636,15 @@ function GearReckoner() {
                         <CheckBox on={it.checked} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500 }}>{it.name}</div>
+                      {isWeightMode && (
+                        <button
+                          className={`icon-btn worn-btn ${it.worn ? "on" : ""}`}
+                          title={it.worn ? "穿在身上（不算進背包重量）" : "點一下標記為穿在身上"}
+                          onClick={() => toggleTempWorn(it.id)}
+                        >
+                          <Shirt size={13} />
+                        </button>
+                      )}
                       {(isWeightMode || hasWeight(it.weight)) && (
                         <div
                           style={{
@@ -1547,7 +1653,7 @@ function GearReckoner() {
                             fontWeight: 600,
                             minWidth: 50,
                             textAlign: "right",
-                            color: isWeightMode && it.checked ? palette.text : palette.textFaint,
+                            color: isWeightMode && it.checked && !it.worn ? palette.text : palette.textFaint,
                           }}
                         >
                           {formatWeight(it.weight)}
@@ -1623,6 +1729,7 @@ function GearReckoner() {
                                 </span>
                               )}
                               {formatDate(r.date)} · {r.items.length} 件
+                              {ra.mode === "weight" && r.wornTotal > 0 && ` · 身上 ${formatWeight(r.wornTotal)}`}
                             </div>
                           </div>
                           <div style={{ ...monoStyle, fontSize: 15, fontWeight: 700, color: palette.amber, whiteSpace: "nowrap" }}>
@@ -1696,11 +1803,11 @@ function GearReckoner() {
           {/* Right: summary */}
           <div style={{ position: "sticky", top: 12, alignSelf: "start" }}>
             {isLibrary ? (
-              <LibrarySummary gear={gear} panelStyle={panelStyle} />
+              <LibrarySummary gear={gear} panelStyle={panelStyle} visible={visibleActs} />
             ) : isWeightMode ? (
               <div style={{ ...panelStyle, padding: 16 }}>
                 <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>
-                  目前裝備總重
+                  背包重量
                 </div>
                 <div
                   style={{
@@ -1717,6 +1824,11 @@ function GearReckoner() {
                 <div style={{ ...monoStyle, fontSize: 13, color: palette.textMuted, marginTop: 2 }}>
                   {grandTotal.toLocaleString()} g · {checkedCount} 件
                 </div>
+                {wornTotal > 0 && (
+                  <div style={{ fontSize: 12, color: palette.textMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Shirt size={12} /> 身上穿戴 {formatWeight(wornTotal)} · 總重 {formatWeight(allTotal)}
+                  </div>
+                )}
                 <div
                   style={{
                     fontSize: 12,
@@ -1895,7 +2007,7 @@ function GearReckoner() {
           </span>
         ) : isWeightMode ? (
           <>
-            <span style={{ fontSize: 12, color: palette.textMuted }}>總重</span>
+            <span style={{ fontSize: 12, color: palette.textMuted }}>背包</span>
             <span
               style={{
                 fontFamily: "'Space Grotesk', sans-serif",
@@ -1936,6 +2048,7 @@ function GearReckoner() {
 
       {editor && (
         <GearEditor
+          visibleActivities={visibleActs}
           item={editor.item}
           categories={categories}
           onSave={handleSaveGear}
@@ -1963,6 +2076,8 @@ function GearReckoner() {
 
       {settingsOpen && (
         <SettingsSheet
+          visibleActs={visibleActs}
+          onToggleActivity={toggleActivityVisible}
           themeKey={themeKey}
           onChooseTheme={chooseTheme}
           categories={categories}
@@ -1989,7 +2104,7 @@ function GearReckoner() {
 // 設定（全螢幕）：第一層是選單，點進去是各個設定頁
 // 之後要加新的設定，在 pages 加一項、再加一個對應的頁面即可
 // ------------------------------------------------------------
-function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryReorder, onClose }) {
+function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryReorder, visibleActs, onToggleActivity, onClose }) {
   const [page, setPage] = useState(null); // null = 選單
 
   const pages = [
@@ -1999,6 +2114,7 @@ function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryRe
       icon: Palette,
       desc: THEME_OPTIONS.find((t) => t.key === themeKey)?.title,
     },
+    { key: "activities", title: "活動顯示", icon: Eye, desc: `顯示 ${visibleActs.length} / ${ACTIVITIES.length}` },
     { key: "categories", title: "類別排序", icon: ArrowUpDown, desc: `${categories.length} 個類別` },
   ];
   const current = pages.find((p) => p.key === page);
@@ -2053,6 +2169,35 @@ function SettingsSheet({ themeKey, onChooseTheme, categories, gear, onCategoryRe
             <p style={{ fontSize: 12, color: palette.textFaint, marginTop: 8, marginBottom: 0 }}>
               選擇會存在帳號裡，手機和電腦會用同一個主題。
             </p>
+          </>
+        )}
+
+        {page === "activities" && (
+          <>
+            <p style={{ fontSize: 12, color: palette.textFaint, margin: "0 0 8px" }}>
+              關掉的活動不會出現在上方那一排；裝備標籤和紀錄都會保留，重新打開就回來。
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {ACTIVITIES.map((a) => {
+                const Icon = ICONS[a.icon];
+                const on = visibleActs.some((v) => v.key === a.key);
+                const n = gear.filter((g) => g.activities.includes(a.key)).length;
+                return (
+                  <div key={a.key} className="menu-row" onClick={() => onToggleActivity(a.key)}>
+                    <Icon size={17} style={{ color: on ? palette.moss : palette.textFaint }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: on ? palette.text : palette.textMuted }}>{a.title}</div>
+                      <div style={{ fontSize: 11.5, color: palette.textFaint }}>
+                        {a.mode === "weight" ? "重量模式" : "清單模式"} · {n} 件裝備
+                      </div>
+                    </div>
+                    <span className={`switch ${on ? "on" : ""}`} role="switch" aria-checked={on}>
+                      <span className="switch-knob" />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
 
@@ -2119,7 +2264,8 @@ function PackingView({ activity, title, items, packed, isWeightMode, saving, onT
   const todo = items.filter((i) => !packed[i.id]);
   const done = items.filter((i) => packed[i.id]);
   const allDone = items.length > 0 && todo.length === 0;
-  const sum = (list) => list.reduce((s, i) => s + (hasWeight(i.weight) ? i.weight : 0), 0);
+  // 打包重量不含穿在身上的
+  const sum = (list) => list.reduce((s, i) => s + (hasWeight(i.weight) && !i.worn ? i.weight : 0), 0);
   const pct = items.length ? (done.length / items.length) * 100 : 0;
 
   const prevDone = useRef(allDone);
@@ -2133,6 +2279,11 @@ function PackingView({ activity, title, items, packed, isWeightMode, saving, onT
     <div key={it.id} className={`pack-row ${isPacked ? "packed" : ""}`} onClick={() => onToggle(it.id)}>
       <CheckBox on={isPacked} />
       <div style={{ flex: 1, minWidth: 0 }}>
+        {it.worn && (
+          <span className="worn-tag" style={{ marginRight: 6, verticalAlign: 1 }} title="穿在身上">
+            <Shirt size={11} />
+          </span>
+        )}
         {it.name}
         {it.note && <span style={{ color: palette.textFaint, fontSize: 13 }}> · {it.note}</span>}
       </div>
@@ -2224,8 +2375,9 @@ function itemsToGroups(items) {
 }
 
 // 「全部裝備」每件裝備右邊的活動小圓點
-function ActivityDots({ activities }) {
-  if (!VISIBLE_ACTIVITIES.some((a) => activities.includes(a.key))) {
+function ActivityDots({ activities, visible }) {
+  // 「?」只代表完全沒貼活動標籤；貼的是被隱藏的活動就不顯示圓點
+  if (activities.length === 0) {
     return (
       <div className="act-dots" title="還沒指定活動">
         <span className="act-dot none">?</span>
@@ -2233,8 +2385,8 @@ function ActivityDots({ activities }) {
     );
   }
   return (
-    <div className="act-dots" title={VISIBLE_ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => a.title).join("、")}>
-      {VISIBLE_ACTIVITIES.filter((a) => activities.includes(a.key)).map((a) => {
+    <div className="act-dots" title={visible.filter((a) => activities.includes(a.key)).map((a) => a.title).join("、")}>
+      {visible.filter((a) => activities.includes(a.key)).map((a) => {
         const Icon = ICONS[a.icon];
         return (
           <span key={a.key} className="act-dot">
@@ -2266,8 +2418,8 @@ function Breakdown({ rows }) {
 }
 
 // 「全部裝備」右側：每個活動有幾件
-function LibrarySummary({ gear, panelStyle }) {
-  const untagged = gear.filter((g) => !VISIBLE_ACTIVITIES.some((a) => g.activities.includes(a.key))).length;
+function LibrarySummary({ gear, panelStyle, visible }) {
+  const untagged = gear.filter((g) => g.activities.length === 0).length;
   return (
     <div style={{ ...panelStyle, padding: 16 }}>
       <div style={{ fontSize: 12, letterSpacing: "0.08em", color: palette.textMuted, marginBottom: 6 }}>裝備庫</div>
@@ -2277,7 +2429,7 @@ function LibrarySummary({ gear, panelStyle }) {
       </div>
       <Breakdown
         rows={[
-          ...VISIBLE_ACTIVITIES.map((a) => {
+          ...visible.map((a) => {
             const n = gear.filter((g) => g.activities.includes(a.key)).length;
             return { key: a.key, label: a.title, text: `${n} 件`, ratio: gear.length ? n / gear.length : 0 };
           }),
@@ -2386,13 +2538,14 @@ function useEscape(onClose) {
 // ------------------------------------------------------------
 // 新增 / 修改裝備的面板（像記帳 App：先選活動、類別，再填名稱、附註、重量）
 // ------------------------------------------------------------
-function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDeleteCategory, onClose }) {
+function GearEditor({ item, categories, visibleActivities, onSave, onDelete, onAddCategory, onDeleteCategory, onClose }) {
   const isNew = !item.id;
   const [acts, setActs] = useState(item.activities || []);
   const [category, setCategory] = useState(item.category || "");
   const [name, setName] = useState(item.name || "");
   const [note, setNote] = useState(item.note || "");
   const [weight, setWeight] = useState(hasWeight(item.weight) ? String(item.weight) : "");
+  const [wornDefault, setWornDefault] = useState(!!item.worn);
   const [error, setError] = useState("");
   useEscape(onClose);
 
@@ -2413,6 +2566,7 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
       name: name.trim(),
       note: note.trim(),
       weight: hasWeight(w) ? Math.round(w * 10) / 10 : null,
+      worn: wornDefault,
     });
   };
 
@@ -2430,7 +2584,7 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
 
         <span className="field-label">用在哪些活動（可複選）</span>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {VISIBLE_ACTIVITIES.map((a) => {
+          {ACTIVITIES.filter((a) => visibleActivities.some((v) => v.key === a.key) || (item.activities || []).includes(a.key)).map((a) => {
             const Icon = ICONS[a.icon];
             return (
               <span key={a.key} className={`act-chip ${acts.includes(a.key) ? "selected" : ""}`} onClick={() => toggleAct(a.key)}>
@@ -2506,6 +2660,15 @@ function GearEditor({ item, categories, onSave, onDelete, onAddCategory, onDelet
           onChange={(e) => setWeight(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
+
+        {weightMatters && (
+          <div className="item-row" style={{ marginTop: 10, paddingLeft: 2 }} onClick={() => setWornDefault((v) => !v)}>
+            <CheckBox on={wornDefault} />
+            <div style={{ fontSize: 13 }}>
+              預設穿在身上 <span style={{ color: palette.textFaint }}>（登山不算進背包重量，每趟還是可以點 👕 切換）</span>
+            </div>
+          </div>
+        )}
 
         {error && <div style={{ color: palette.warn, fontSize: 12.5, marginTop: 10 }}>{error}</div>}
 
